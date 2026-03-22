@@ -257,7 +257,7 @@ npm run web        # Web
       "package": "com.bymap.app",
       "config": {
         "googleMaps": {
-          "apiKey": "AIzaSyDIJ9XX2ZvRKCJcFRrl-lRanEtFUow4piM"
+          "apiKey": "***************************************"
         }
       }
     }
