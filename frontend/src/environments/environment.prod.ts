@@ -1,0 +1,6 @@
+export const environment = {
+  production: true,
+  apiUrl: 'http://10.145.225.174:5000/api',
+};
+
+export const API_URL = environment.apiUrl;

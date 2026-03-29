@@ -1,42 +1,81 @@
-import React from 'react';
-import { 
-  StyleSheet, 
-  Text, 
-  View, 
-  TouchableOpacity 
-} from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import {StyleSheet,View,Image,Animated,Easing,} from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 
+const LOADING_DURATION = 3000; // 3 secondes
+
 export default function Welcome() {
-  const navigation = useNavigation();
+  const navigation  = useNavigation();
+  const progress    = useRef(new Animated.Value(0)).current;
+  const logoOpacity = useRef(new Animated.Value(0)).current;
+  const logoScale   = useRef(new Animated.Value(0.8)).current;
+
+  useEffect(() => {
+    // 1. Apparition du logo (fade + scale)
+    Animated.parallel([
+      Animated.timing(logoOpacity, {
+        toValue: 1,
+        duration: 700,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: true,
+      }),
+      Animated.spring(logoScale, {
+        toValue: 1,
+        tension: 60,
+        friction: 8,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    // 2. Barre de progression sur 3 secondes
+    Animated.timing(progress, {
+      toValue: 1,
+      duration: LOADING_DURATION,
+      easing: Easing.inOut(Easing.ease),
+      useNativeDriver: false,
+    }).start();
+
+    // 3. Naviguer vers Map après 3 secondes
+    const timer = setTimeout(() => {
+      navigation.replace('Map');
+    }, LOADING_DURATION);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  const progressWidth = progress.interpolate({
+    inputRange:  [0, 1],
+    outputRange: ['0%', '100%'],
+  });
 
   return (
     <LinearGradient
-      colors={['#2B1B47', '#1E0B3C', '#140729']}
+      colors={['#0a0a1a', '#0d1020', '#050510']}
       style={styles.container}
     >
-      <View style={styles.content}>
-        <Text style={styles.title}>Bienvenue</Text>
-        <Text style={styles.subtitle}>
-          Bienvenue dans ByMap .
-        </Text>
-        <TouchableOpacity
-          style={styles.button}
-        >
-          <Text style={styles.buttonText}>Suivant →</Text>
-        </TouchableOpacity>
+      <StatusBar style="light" />
 
-        {/*<TouchableOpacity
-          style={styles.button}
-          onPress={() => navigation.navigate('Login')}
-        >
-          <Text style={styles.buttonText}>Commencer →</Text>
-        </TouchableOpacity>*/}
+      {/* Logo animé centré */}
+      <Animated.View style={[
+        styles.logoContainer,
+        { opacity: logoOpacity, transform: [{ scale: logoScale }] },
+      ]}>
+        <Image
+          source={require('../../assets/logo.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+      </Animated.View>
+
+      {/* Barre de chargement bleue */}
+      <View style={styles.loaderWrapper}>
+        <View style={styles.loaderTrack}>
+          <Animated.View style={[styles.loaderFill, { width: progressWidth }]} />
+        </View>
       </View>
 
-      <StatusBar style="light" />
     </LinearGradient>
   );
 }
@@ -44,43 +83,39 @@ export default function Welcome() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  content: {
-    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 40,
   },
-  title: {
-    fontSize: 54,
-    fontWeight: 'bold',
-    color: '#ffffff',
-    marginBottom: 16,
-    letterSpacing: 1.2,
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: 20,
-    color: 'rgba(255, 255, 255, 0.75)',
-    textAlign: 'center',
-    lineHeight: 30,
+  logoContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 60,
   },
-  button: {
-    backgroundColor: 'rgba(108, 114, 203, 0.9)',
-    paddingVertical: 16,
-    paddingHorizontal: 48,
-    borderRadius: 30,
-    elevation: 4,
-    shadowColor: '#6C72CB',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
+  logo: {
+    width: 280,
+    height: 280,
   },
-  buttonText: {
-    color: '#ffffff',
-    fontSize: 18,
-    fontWeight: '600',
-    letterSpacing: 0.5,
+  loaderWrapper: {
+    position: 'absolute',
+    bottom: 80,
+    left: 50,
+    right: 50,
+  },
+  loaderTrack: {
+    width: '100%',
+    height: 4,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  loaderFill: {
+    height: '100%',
+    backgroundColor: '#1E90FF',
+    borderRadius: 4,
+    elevation: 2,
+    shadowColor: '#1E90FF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9,
+    shadowRadius: 8,
   },
 });

@@ -4,25 +4,49 @@
     "slug": "ByMap",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/logo.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/logo.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#140729"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.bymap.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "ByMap utilise votre position pour afficher votre emplacement sur la carte.",
+        "NSLocationAlwaysUsageDescription": "ByMap utilise votre position pour le suivi en temps réel."
+      }
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
-      }
+        "foregroundImage": "./assets/logo.png",
+        "backgroundColor": "#140729"
+      },
+      "package": "com.bymap.app",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyDIJ9XX2ZvRKCJcFRrl-lRanEtFUow4piM"
+        }
+      },
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
     },
     "web": {
-      "favicon": "./assets/favicon.png"
-    }
+      "favicon": "./assets/logo.png"
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "ByMap utilise votre position pour afficher votre emplacement sur la carte.",
+          "locationAlwaysAndWhenInUsePermission": "ByMap utilise votre position pour le suivi en temps réel."
+        }
+      ]
+    ]
   }
 }
