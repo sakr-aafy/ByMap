@@ -10,6 +10,7 @@ import {
   Keyboard,
   SafeAreaView,
   PanResponder,
+  ActivityIndicator,
 } from 'react-native';
 
 const LOGO = require('../../assets/logo.png');
@@ -18,6 +19,7 @@ import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/nativ
 import { cachedGeocode, cachedZone, cachedSearch } from '../utils/cache';
 import { getCurrentUser, logout as apiLogout } from '../utils/api';
 import { API_URL } from '../environments/environment';
+import { D, shadow } from '../theme/index';
 // Location removed — Tunis used as default
 
 const DEFAULT_COORDS = { latitude: 36.8065, longitude: 10.1815 };
@@ -107,6 +109,64 @@ const GOVERNORATE_COORDS = {
   'Gafsa':        { lat: 34.4250, lng:  8.7842 },
   'Tozeur':       { lat: 33.9197, lng:  8.1335 },
   'Kébili':       { lat: 33.7046, lng:  8.9690 },
+};
+
+// ─── Index de coordonnées construit depuis tunisia.json ───────────────────────
+const TUNISIA_ZONE_COORDS = {};
+Object.entries(TUNISIA_DATA).forEach(([gouvernorat, places]) => {
+  // Indexer chaque délégation et localité
+  places.forEach(place => {
+    if (place.lat != null && place.lng != null) {
+      const coords = { lat: place.lat, lng: place.lng };
+      if (place.delegation && !TUNISIA_ZONE_COORDS[place.delegation]) {
+        TUNISIA_ZONE_COORDS[place.delegation] = coords;
+      }
+      if (place.localite && !TUNISIA_ZONE_COORDS[place.localite]) {
+        TUNISIA_ZONE_COORDS[place.localite] = coords;
+      }
+    }
+  });
+  // Indexer le gouvernorat lui-même (premier enregistrement avec coords)
+  const first = places.find(p => p.lat != null && p.lng != null);
+  if (first && !TUNISIA_ZONE_COORDS[gouvernorat]) {
+    TUNISIA_ZONE_COORDS[gouvernorat] = { lat: first.lat, lng: first.lng };
+  }
+});
+
+// ─── Cache des coordonnées par nom de zone (persiste entre renders) ───────────
+const zoneCoordCache = {};
+let   zoneFetchRunning = false; // garde anti-concurrent
+
+const getZoneCoords = (name, gouvernorat) => {
+  if (zoneCoordCache[name] !== undefined) return zoneCoordCache[name];
+
+  // 1. Recherche exacte dans tunisia.json
+  let coords = TUNISIA_ZONE_COORDS[name];
+
+  // 2. Recherche insensible à la casse dans tunisia.json
+  if (!coords) {
+    const lowerName = name.toLowerCase();
+    const key = Object.keys(TUNISIA_ZONE_COORDS).find(k => k.toLowerCase() === lowerName);
+    if (key) coords = TUNISIA_ZONE_COORDS[key];
+  }
+
+  // 3. Recherche partielle dans tunisia.json
+  if (!coords) {
+    const lowerName = name.toLowerCase();
+    const key = Object.keys(TUNISIA_ZONE_COORDS).find(
+      k => k.toLowerCase().includes(lowerName) || lowerName.includes(k.toLowerCase())
+    );
+    if (key) coords = TUNISIA_ZONE_COORDS[key];
+  }
+
+  // 4. Fallback sur GOVERNORATE_COORDS (centres pré-définis)
+  if (!coords) {
+    coords = GOVERNORATE_COORDS[name];
+    if (!coords && gouvernorat) coords = GOVERNORATE_COORDS[gouvernorat];
+  }
+
+  zoneCoordCache[name] = coords || null;
+  return zoneCoordCache[name];
 };
 
 const ZONE_RADII = [
@@ -334,19 +394,39 @@ L.tileLayer('${style.url}', {
 }).addTo(map);
 window.centerOnUser = function(lat,lng) { map.setView([lat,lng], map.getZoom(), { animate:true, duration:0.5 }); };
 
-// ── Zone Circle (pickMode) ───────────────────────────────────────────────────
+// ── Zone Circle — toujours disponible (pickMode ET snapToZone Radio Garden) ──
 var zoneCircle = null;
 var isPickMode = ${pickMode ? 'true' : 'false'};
-if (isPickMode) {
-  zoneCircle = L.circle([${lat},${lng}], {
-    radius: ${zoneRadius},
-    color: '#1E90FF',
-    fillColor: '#1E90FF',
-    fillOpacity: 0.12,
-    weight: 2.5,
-    dashArray: '6,4',
-  }).addTo(map);
-}
+
+// Créer le cercle en mode pick OU en mode normal (pour Radio Garden snap)
+zoneCircle = L.circle([${lat},${lng}], {
+  radius: ${zoneRadius},
+  color: '#34C759',
+  fillColor: '#34C759',
+  fillOpacity: isPickMode ? 0.12 : 0.08,
+  weight: isPickMode ? 2.5 : 2,
+  dashArray: '6,4',
+  opacity: isPickMode ? 1 : 0,    // invisible par défaut sauf en pickMode
+}).addTo(map);
+
+// Afficher / masquer le cercle
+window.showZoneCircle = function(show) {
+  if (zoneCircle) {
+    zoneCircle.setStyle({ opacity: show ? 1 : 0, fillOpacity: show ? 0.12 : 0 });
+  }
+};
+
+// Déplacer + afficher avec animation flyTo (Radio Garden)
+window.snapZoneToPoint = function(lat, lng, radius, zoneName) {
+  if (zoneCircle) {
+    zoneCircle.setLatLng([lat, lng]);
+    zoneCircle.setRadius(radius || 1000);
+    zoneCircle.setStyle({ opacity: 1, fillOpacity: 0.14, color: '#34C759', fillColor: '#34C759' });
+  }
+  map.flyTo([lat, lng], 13, { animate: true, duration: 1.1 });
+  // Message retour
+  window.ReactNativeWebView.postMessage('ZONE_SNAP:' + lat.toFixed(5) + ':' + lng.toFixed(5) + ':' + (zoneName || ''));
+};
 
 window.updateZoneCircle = function(lat, lng, radius) {
   if (zoneCircle) {
@@ -366,24 +446,28 @@ map.on('zoomend', function() {
   if (map.getZoom() <= 2) window.ReactNativeWebView.postMessage('SWITCH_TO_GLOBE');
 });
 
-// ── Points verts par zone ────────────────────────────────────────────────────
+// ── Points verts par zone — CLIQUABLES (Radio Garden) ────────────────────────
 var zoneDotLayer = L.layerGroup().addTo(map);
 window.addZoneDots = function(dots) {
   zoneDotLayer.clearLayers();
   dots.forEach(function(d) {
     var pulse = L.divIcon({
       className: '',
-      html: '<div style="width:14px;height:14px;border-radius:50%;background:#34C759;border:2px solid #fff;box-shadow:0 0 0 3px rgba(52,199,89,0.35);"></div>',
-      iconSize: [14, 14],
-      iconAnchor: [7, 7],
+      html: '<div style="width:8px;height:8px;border-radius:50%;background:#34C759;border:1.5px solid #fff;box-shadow:0 0 0 3px rgba(52,199,89,0.3);cursor:pointer;transition:transform 0.15s;"></div>',
+      iconSize: [10, 10],
+      iconAnchor: [5, 5],
     });
     var m = L.marker([d.lat, d.lng], { icon: pulse });
     m.bindTooltip(
       '<b>' + d.name + '</b><br/>' +
       '<span style="color:#34C759">● ' + d.local + ' local</span>  ' +
       '<span style="color:#1E90FF">● ' + d.duo + ' duo</span>',
-      { direction: 'top', offset: [0, -8] }
+      { direction: 'top', offset: [0, -10] }
     );
+    // ── CLIC sur point vert → snap Radio Garden ──
+    m.on('click', function() {
+      window.snapZoneToPoint(d.lat, d.lng, 1000, d.name);
+    });
     zoneDotLayer.addLayer(m);
   });
 };
@@ -400,6 +484,11 @@ export default function MapScreen() {
   const route      = useRoute ? useRoute() : { params: {} };
   const pickMode   = route?.params?.pickMode === true; // mode sélection zone
 
+  // ── Radio Garden : snap vers une zone depuis LocalScreen ──────────────────
+  // Quand LocalScreen appelle navigation.navigate('Map', { snapToZone: {name, lat, lng} })
+  // on fait glisser le cercle vers ces coords avec une animation fluide
+  const snapToZone = route?.params?.snapToZone || null;
+
   const [userCoords, setUserCoords] = useState(DEFAULT_COORDS);
   const [mode, setMode] = useState('map');
   const [mapCenter, setMapCenter] = useState(null);
@@ -412,6 +501,10 @@ export default function MapScreen() {
   const [modeView,  setModeView]  = useState('local'); // 'local' | 'duo'
   const [mapStyle,  setMapStyle]  = useState('relief');
   const [pickedCenter, setPickedCenter] = useState(null);
+
+  const [refreshingDots, setRefreshingDots] = useState(false);
+  const pullAnim   = useRef(new Animated.Value(0)).current;
+  const pullActive = useRef(false);
 
   // ── Zone Circle (pickMode) ────────────────────────────────────────────────
   const [zoneRadius,       setZoneRadius]       = useState(1000);
@@ -487,47 +580,29 @@ export default function MapScreen() {
   };
 
   const fetchAndInjectZoneDots = async () => {
+    if (zoneFetchRunning) return;
+    zoneFetchRunning = true;
+    setRefreshingDots(true);
     try {
-      const res  = await fetch(`${API_URL}/publications?limit=500`);
+      const res  = await fetch(`${API_URL}/publications/zone-dots`);
       const data = await res.json();
-      const pubs = data.publications || [];
+      const zones = data.zones || [];
 
-      // Grouper par gouvernorat
-      const counts = {};
-      pubs.forEach(p => {
-        const gov =
-          p.localisation?.gouvernorat ||
-          p.localisationDebut?.gouvernorat ||
-          p.localisation?.ville ||
-          p.localisationDebut?.ville;
-        if (!gov) return;
-        if (!counts[gov]) counts[gov] = { local: 0, duo: 0 };
-        if (p.mode === 'local') counts[gov].local++;
-        else                    counts[gov].duo++;
-      });
+      // Résoudre les coordonnées depuis tunisia.json (synchrone, pas de réseau)
+      const dots = [];
+      for (const z of zones) {
+        const coords = getZoneCoords(z.name, z.gouvernorat);
+        if (coords) dots.push({ name: z.name, lat: coords.lat, lng: coords.lng, local: z.local, duo: z.duo });
+      }
 
-      // Construire le tableau de points avec coordonnées
-      const dots = Object.entries(counts)
-        .map(([name, c]) => {
-          // Chercher dans GOVERNORATE_COORDS (correspondance exacte ou partielle)
-          let coords = GOVERNORATE_COORDS[name];
-          if (!coords) {
-            const key = Object.keys(GOVERNORATE_COORDS).find(
-              k => k.toLowerCase().includes(name.toLowerCase()) ||
-                   name.toLowerCase().includes(k.toLowerCase())
-            );
-            coords = key ? GOVERNORATE_COORDS[key] : null;
-          }
-          if (!coords) return null;
-          return { name, lat: coords.lat, lng: coords.lng, local: c.local, duo: c.duo };
-        })
-        .filter(Boolean);
-
-      if (webViewRef.current && dots.length > 0) {
+      if (webViewRef.current) {
         webViewRef.current.injectJavaScript(`addZoneDots(${JSON.stringify(dots)}); true;`);
       }
     } catch (e) {
       console.error('[ZONE DOTS]', e);
+    } finally {
+      zoneFetchRunning = false;
+      setRefreshingDots(false);
     }
   };
 
@@ -638,6 +713,39 @@ export default function MapScreen() {
     }, [])
   );
 
+  // ── Radio Garden : glisse le cercle vers la zone cliquée depuis LocalScreen
+  // Déclenché quand snapToZone change (navigation.navigate('Map', { snapToZone }))
+  useEffect(() => {
+    if (!snapToZone) return;
+    const { lat, lng, name } = snapToZone;
+    if (!lat || !lng) return;
+
+    const newCenter = { latitude: lat, longitude: lng };
+
+    // 1. Basculer en mode carte si on est en globe
+    if (mode !== 'map') {
+      setMode('map');
+      setReady(false);
+    }
+    // 2. Mettre à jour le centre — la carte va se recharger sur ces coords
+    setMapCenter(newCenter);
+    setPickedCenter(newCenter);
+    currentCenter.current = newCenter;
+
+    // 3. Quand la carte est prête, injecter le recentrage fluide + cercle
+    //    (géré dans l'effect [ready] ci-dessous via mapCenter)
+  }, [snapToZone]);
+
+  // 4. Dès que la carte est prête ET qu'on a un snapToZone, on centre + cercle
+  useEffect(() => {
+    if (!ready || !webViewRef.current || !snapToZone) return;
+    const { lat, lng, name } = snapToZone;
+    // flyTo + déplacer le cercle vert en une seule commande JS
+    webViewRef.current.injectJavaScript(
+      `window.snapZoneToPoint(${lat}, ${lng}, 1000, '${(name || '').replace(/'/g, '')}'); true;`
+    );
+  }, [ready, snapToZone]);
+
   // Géolocalisation désactivée — Tunis affiché par défaut
 
   useEffect(() => {
@@ -653,10 +761,31 @@ export default function MapScreen() {
 
   // startLocationTracking supprimé
 
-  // Injecter les points verts quand la carte est prête
+  // Injecter les points verts quand la carte est prête (une seule fois)
   useEffect(() => {
-    if (ready && mode === 'map' && !pickMode) fetchAndInjectZoneDots();
-  }, [ready, mode]);
+    if (!ready || mode !== 'map' || pickMode) return;
+    fetchAndInjectZoneDots();
+  }, [ready, mode, pickMode]);
+
+  // Pull-to-refresh : glisser vers le bas depuis le haut de la carte
+  const fetchDotsRef = useRef(null);
+  useEffect(() => { fetchDotsRef.current = fetchAndInjectZoneDots; });
+
+  const pullResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gs) => gs.dy > 8 && gs.moveY < 140 && !pullActive.current,
+      onPanResponderMove: (_, gs) => {
+        if (gs.dy > 0) pullAnim.setValue(Math.min(gs.dy * 0.5, 50));
+      },
+      onPanResponderRelease: (_, gs) => {
+        if (gs.dy > 50) {
+          pullActive.current = true;
+          fetchDotsRef.current?.().finally(() => { pullActive.current = false; });
+        }
+        Animated.spring(pullAnim, { toValue: 0, useNativeDriver: true }).start();
+      },
+    })
+  ).current;
 
   // Mise à jour du cercle de zone quand le rayon change
   useEffect(() => {
@@ -708,6 +837,25 @@ export default function MapScreen() {
       if (pickMode) {
         const c = pickedCenter || mapCenter || DEFAULT_COORDS;
         detectZoneFromCoords(c.latitude, c.longitude);
+      }
+      return;
+    }
+    // ── Radio Garden : clic sur point vert dans la carte Leaflet ──────────
+    if (msg.startsWith('ZONE_SNAP:')) {
+      // Format: "ZONE_SNAP:lat:lng:zoneName" — lat et lng sont numériques
+      const raw   = msg.slice('ZONE_SNAP:'.length);        // "lat:lng:zoneName"
+      const sep1  = raw.indexOf(':');
+      const sep2  = raw.indexOf(':', sep1 + 1);
+      const snapLat  = parseFloat(raw.slice(0, sep1));
+      const snapLng  = parseFloat(raw.slice(sep1 + 1, sep2 >= 0 ? sep2 : undefined));
+      const snapName = sep2 >= 0 ? raw.slice(sep2 + 1) : '';
+      if (!isNaN(snapLat) && !isNaN(snapLng)) {
+        const newCenter = { latitude: snapLat, longitude: snapLng };
+        setMapCenter(newCenter);
+        setPickedCenter(newCenter);
+        currentCenter.current = newCenter;
+        // Naviguer vers Local avec cette zone (le cercle reste affiché sur Map)
+        navigation.navigate('Local', { zone: snapName });
       }
       return;
     }
@@ -764,6 +912,27 @@ export default function MapScreen() {
         setSupportMultipleWindows={false}
       />
 
+      {/* ── Pull-to-refresh overlay (haut de la carte) ── */}
+      {mode === 'map' && !pickMode && (
+        <View
+          pointerEvents="box-none"
+          style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 120, zIndex: 5 }}
+          {...pullResponder.panHandlers}
+        >
+          <Animated.View style={{
+            alignSelf: 'center',
+            marginTop: 8,
+            transform: [{ translateY: pullAnim }],
+            opacity: pullAnim.interpolate({ inputRange: [0, 40], outputRange: [0, 1] }),
+          }}>
+            {refreshingDots
+              ? <ActivityIndicator color="#34C759" size="small" />
+              : <Text style={{ color: '#34C759', fontSize: 18, fontWeight: '700' }}>↓</Text>
+            }
+          </Animated.View>
+        </View>
+      )}
+
       {/* Overlay chargement */}
       {!ready && (
         <View style={styles.loadingOverlay}>
@@ -814,7 +983,7 @@ export default function MapScreen() {
         {!menuOpen && suggestions.length === 0 && mode === 'map' && (
           <View style={styles.zoneBanner}>
             <Text style={styles.zoneBannerName} numberOfLines={1}>
-              📍  {detectedZone || cityName || '…'}
+              📍  {snapToZone?.name || detectedZone || cityName || '…'}
             </Text>
           </View>
         )}
@@ -1040,7 +1209,7 @@ export default function MapScreen() {
             <TouchableOpacity
               style={styles.tabItem}
               activeOpacity={0.8}
-              onPress={() => navigation.navigate('Profile')}
+              onPress={() => navigation.navigate(currentUser ? 'Profile' : 'Login')}
             >
               <View style={styles.tabIconBox}>
                 <Text style={styles.tabIcon}>👤</Text>
@@ -1109,23 +1278,20 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     gap: 8,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: D.glassBorder,
     elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
+    ...shadow.soft,
   },
   searchIcon: { fontSize: 13 },
   searchInput: {
     flex: 1,
-    color: '#ffffff',
+    color: D.white,
     fontSize: 14,
     padding: 0,
     margin: 0,
   },
   clearBtn: {
-    color: 'rgba(255,255,255,0.55)',
+    color: D.textDim,
     fontSize: 13,
     paddingHorizontal: 2,
   },
@@ -1138,17 +1304,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 5,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
+    borderColor: D.glassBorder,
+    ...shadow.soft,
   },
   menuLine: {
     width: 20,
     height: 2,
-    backgroundColor: '#ffffff',
+    backgroundColor: D.white,
     borderRadius: 2,
   },
 
@@ -1161,10 +1323,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 7,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: D.glassBorder,
   },
   zoneBannerName: {
-    color: '#ffffff',
+    color: D.white,
     fontSize: 22,
     fontWeight: '1000',
     letterSpacing: 0.5,
@@ -1179,12 +1341,9 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: D.glassBorder,
     elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
+    ...shadow.soft,
   },
   suggestionRow: {
     flexDirection: 'row',
@@ -1199,8 +1358,8 @@ const styles = StyleSheet.create({
   },
   suggestionIcon: { fontSize: 15 },
   suggestionTexts: { flex: 1 },
-  suggestionTitle: { color: '#ffffff', fontSize: 14, fontWeight: '600' },
-  suggestionSub: { color: 'rgba(255,255,255,0.45)', fontSize: 11, marginTop: 2 },
+  suggestionTitle: { color: D.white, fontSize: 14, fontWeight: '600' },
+  suggestionSub: { color: D.textFaint, fontSize: 11, marginTop: 2 },
 
   // ── Menu déroulant ───────────────────────────────────────────────────────
   menuDropdown: {
@@ -1210,12 +1369,9 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: D.glassBorder,
     elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
+    ...shadow.soft,
   },
   menuRow: {
     flexDirection: 'row',
@@ -1225,7 +1381,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   menuRowIcon: { fontSize: 18 },
-  menuRowText: { color: '#ffffff', fontSize: 15, fontWeight: '500' },
+  menuRowText: { color: D.white, fontSize: 15, fontWeight: '500' },
   menuUserRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1235,12 +1391,12 @@ const styles = StyleSheet.create({
   },
   menuUserAvatar: { fontSize: 28 },
   menuUserName: {
-    color: '#ffffff',
+    color: D.white,
     fontSize: 15,
     fontWeight: '700',
   },
   menuUserEmail: {
-    color: 'rgba(255,255,255,0.5)',
+    color: D.textFaint,
     fontSize: 12,
     marginTop: 2,
     maxWidth: 180,
@@ -1261,7 +1417,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 20,
   },
-  errorText: { color: 'white', fontSize: 12, fontWeight: '600' },
+  errorText: { color: D.white, fontSize: 12, fontWeight: '600' },
 
   // ── Footer zone ──────────────────────────────────────────────────────────
   zoneFooter: {
@@ -1491,8 +1647,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.1)',
   },
   menuStyleBtnActive: {
-    backgroundColor: '#6C72CB',
-    borderColor: '#6C72CB',
+    backgroundColor: D.blue,
+    borderColor: D.blue,
   },
   menuStyleIcon: { fontSize: 14 },
   menuStyleLabel: {
@@ -1508,9 +1664,9 @@ const styles = StyleSheet.create({
   tabBar: {
     position: 'absolute',
     bottom: 0, left: 0, right: 0,
-    backgroundColor: '#ffffff',
+    backgroundColor: 'rgba(10,22,40,0.96)',
     borderTopWidth: 1,
-    borderTopColor: '#EEEFF5',
+    borderTopColor: D.glassBorder,
     paddingBottom: 10,
     paddingTop: 8,
   },
@@ -1520,10 +1676,10 @@ const styles = StyleSheet.create({
   },
   tabItem:          { flex: 1, alignItems: 'center', gap: 3 },
   tabIconBox:       { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center', backgroundColor: 'transparent' },
-  tabIconBoxActive: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center', backgroundColor: '#111' },
+  tabIconBoxActive: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center', backgroundColor: D.blueGlow },
   tabIcon:          { fontSize: 18 },
-  tabLabel:         { fontSize: 11, color: '#999', fontWeight: '500' },
-  tabLabelActive:   { fontSize: 11, color: '#111', fontWeight: '700' },
+  tabLabel:         { fontSize: 11, color: D.textFaint, fontWeight: '500' },
+  tabLabelActive:   { fontSize: 11, color: D.blue, fontWeight: '700' },
 
   // Logo central + badge notification
   tabLogoWrap: {
@@ -1543,12 +1699,12 @@ const styles = StyleSheet.create({
     minWidth: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: '#FF3B30',
+    backgroundColor: D.red,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 4,
     borderWidth: 1.5,
-    borderColor: '#ffffff',
+    borderColor: D.navy,
   },
   tabBadgeText: {
     color: '#ffffff',

@@ -76,6 +76,14 @@ const UserSchema = new mongoose.Schema(
     isEmailVerified:          { type: Boolean, default: false },
     emailVerificationCode:    { type: String,  select: false },
     emailVerificationExpires: { type: Date,    select: false },
+
+    // ── Réinitialisation mot de passe ─────────────────────────────────────────
+    passwordResetCode:        { type: String,  select: false },
+    passwordResetExpires:     { type: Date,    select: false },
+
+    // ── OTP de connexion ─────────────────────────────────────────────────────
+    loginOtpCode:             { type: String,  select: false },
+    loginOtpExpires:          { type: Date,    select: false },
   },
   { timestamps: true }
 );

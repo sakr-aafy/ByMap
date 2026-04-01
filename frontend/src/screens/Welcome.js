@@ -1,121 +1,93 @@
+// src/screens/Welcome.js — Splash screen
 import React, { useEffect, useRef } from 'react';
-import {StyleSheet,View,Image,Animated,Easing,} from 'react-native';
+import { StyleSheet, View, Image, Animated, Easing, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 
-const LOADING_DURATION = 3000; // 3 secondes
+const { width } = Dimensions.get('window');
+const LOGO = require('../../assets/logo.png');
 
 export default function Welcome() {
-  const navigation  = useNavigation();
-  const progress    = useRef(new Animated.Value(0)).current;
-  const logoOpacity = useRef(new Animated.Value(0)).current;
-  const logoScale   = useRef(new Animated.Value(0.8)).current;
+  const navigation = useNavigation();
+  const logoOpacity   = useRef(new Animated.Value(0)).current;
+  const logoScale     = useRef(new Animated.Value(0.8)).current;
+  const progress      = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // 1. Apparition du logo (fade + scale)
+    // Logo fade-in + scale
     Animated.parallel([
-      Animated.timing(logoOpacity, {
-        toValue: 1,
-        duration: 700,
-        easing: Easing.out(Easing.ease),
-        useNativeDriver: true,
-      }),
-      Animated.spring(logoScale, {
-        toValue: 1,
-        tension: 60,
-        friction: 8,
-        useNativeDriver: true,
-      }),
+      Animated.timing(logoOpacity, { toValue: 1, duration: 700, useNativeDriver: true }),
+      Animated.spring(logoScale,   { toValue: 1, tension: 60, friction: 10, useNativeDriver: true }),
     ]).start();
 
-    // 2. Barre de progression sur 3 secondes
+    // Progress bar
     Animated.timing(progress, {
       toValue: 1,
-      duration: LOADING_DURATION,
+      duration: 3000,
       easing: Easing.inOut(Easing.ease),
       useNativeDriver: false,
     }).start();
 
-    // 3. Naviguer vers Map après 3 secondes
-    const timer = setTimeout(() => {
-      navigation.replace('Map');
-    }, LOADING_DURATION);
-
-    return () => clearTimeout(timer);
+    // Auto-navigate
+    const t = setTimeout(() => navigation.replace('Map'), 3200);
+    return () => clearTimeout(t);
   }, []);
 
-  const progressWidth = progress.interpolate({
-    inputRange:  [0, 1],
-    outputRange: ['0%', '100%'],
-  });
+  const progressWidth = progress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
 
   return (
-    <LinearGradient
-      colors={['#0a0a1a', '#0d1020', '#050510']}
-      style={styles.container}
-    >
+    <LinearGradient colors={['#0a1628', '#0f2040', '#0d1a30']} style={styles.root}>
       <StatusBar style="light" />
 
-      {/* Logo animé centré */}
-      <Animated.View style={[
-        styles.logoContainer,
-        { opacity: logoOpacity, transform: [{ scale: logoScale }] },
-      ]}>
-        <Image
-          source={require('../../assets/logo.png')}
-          style={styles.logo}
-          resizeMode="contain"
-        />
+      {/* Logo */}
+      <Animated.View style={[styles.logoWrap, { opacity: logoOpacity, transform: [{ scale: logoScale }] }]}>
+        <Image source={LOGO} style={styles.logo} resizeMode="contain" />
       </Animated.View>
 
-      {/* Barre de chargement bleue */}
-      <View style={styles.loaderWrapper}>
-        <View style={styles.loaderTrack}>
-          <Animated.View style={[styles.loaderFill, { width: progressWidth }]} />
-        </View>
+      {/* Loading bar */}
+      <View style={styles.barTrack}>
+        <Animated.View style={[styles.barFill, { width: progressWidth }]}>
+          <LinearGradient
+            colors={['#34C759', '#1E90FF']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={StyleSheet.absoluteFill}
+          />
+        </Animated.View>
       </View>
-
     </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  logoContainer: {
+  logoWrap: {
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 60,
   },
   logo: {
-    width: 280,
-    height: 280,
+    width: width * 0.55,
+    height: width * 0.55,
   },
-  loaderWrapper: {
+  barTrack: {
     position: 'absolute',
-    bottom: 80,
-    left: 50,
-    right: 50,
-  },
-  loaderTrack: {
-    width: '100%',
-    height: 4,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    bottom: 60,
+    left: 48,
+    right: 48,
+    height: 3,
     borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.1)',
     overflow: 'hidden',
   },
-  loaderFill: {
+  barFill: {
     height: '100%',
-    backgroundColor: '#1E90FF',
     borderRadius: 4,
-    elevation: 2,
-    shadowColor: '#1E90FF',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.9,
-    shadowRadius: 8,
+    overflow: 'hidden',
   },
 });

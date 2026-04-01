@@ -17,7 +17,9 @@
       "bundleIdentifier": "com.bymap.app",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "ByMap utilise votre position pour afficher votre emplacement sur la carte.",
-        "NSLocationAlwaysUsageDescription": "ByMap utilise votre position pour le suivi en temps réel."
+        "NSLocationAlwaysUsageDescription": "ByMap utilise votre position pour le suivi en temps réel.",
+        "NSMicrophoneUsageDescription": "ByMap utilise le microphone pour les appels vocaux.",
+        "NSCameraUsageDescription": "ByMap utilise la caméra pour les appels vidéo."
       }
     },
     "android": {
@@ -33,13 +35,17 @@
       },
       "permissions": [
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION"
+        "ACCESS_FINE_LOCATION",
+        "RECORD_AUDIO",
+        "CAMERA",
+        "MODIFY_AUDIO_SETTINGS"
       ]
     },
     "web": {
       "favicon": "./assets/logo.png"
     },
     "plugins": [
+      "expo-dev-client",
       [
         "expo-location",
         {

@@ -18,9 +18,11 @@ import {
 } from 'react-native';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
+import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCurrentUser, logout as apiLogout } from '../utils/api';
 import { environment } from '../environments/environment.prod';
+import { D, G, shadow, DarkBackground, GlassView, CS } from '../theme/index';
 const API_URL = environment.apiUrl;
 const SERVER_BASE = API_URL.replace('/api', '');
 const { width } = Dimensions.get('window');
@@ -40,20 +42,22 @@ const timeAgo = (dateStr) => {
   return `${Math.floor(diff / 86400)}j`;
 };
 
-// ── Couleurs ──────────────────────────────────────────────────────────────────
+// ── Couleurs — alias vers le Design System ByMap ──────────────────────────────
 const C = {
-  local:      '#34C759',   // vert  → LOCAL
-  localLight: '#E8F9EE',
-  localBorder:'#A8E6BA',
-  duo:        '#1E90FF',   // bleu  → DUO
-  duoLight:   '#EBF4FF',
-  duoBorder:  '#A0CAFF',
-  bg:         '#F5F6FA',
-  white:      '#FFFFFF',
-  border:     '#EEEFF5',
-  text:       '#1a1a2e',
-  grey:       '#888',
-  dark:       '#111',
+  local:       D.green,
+  localGlow:   D.greenGlow,
+  duo:         D.blue,
+  duoGlow:     D.blueGlow,
+  navy:        D.navy,
+  navyMid:     D.navyMid,
+  navyLight:   D.navyLight,
+  glass:       D.glass,
+  glassMid:    D.glassMid,
+  glassBorder: D.glassBorder,
+  white:       D.white,
+  textDim:     D.textDim,
+  textFaint:   D.textFaint,
+  red:         D.red,
 };
 
 // ── Menu items ────────────────────────────────────────────────────────────────
@@ -69,14 +73,13 @@ const MENU_ITEMS = [
 
 // ── Bottom Tab Bar items ───────────────────────────────────────────────────────
 const TAB_ITEMS = [
-  { key: 'globe',   label: 'Globe',   icon: '🌍' },
-  { key: 'search',  label: 'Search',  icon: '🔍' },
-  { key: 'profile', label: 'Profile', icon: '👤' },
+  { key: 'globe',    label: 'Globe',    icon: '🌍',  authRequired: false },
+  { key: 'messages', label: 'Messages', icon: '💬',  authRequired: true  },
+  { key: 'profile',  label: 'Profil',   icon: '👤',  authRequired: true  },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Composant PubCard — carte LOCAL (vert) ou DUO (bleu)
-// Correspond exactement au wireframe 003 / 003b
 // ─────────────────────────────────────────────────────────────────────────────
 const PubCard = ({ item, onPress }) => {
   const scaleAnim  = useRef(new Animated.Value(1)).current;
@@ -88,8 +91,7 @@ const PubCard = ({ item, onPress }) => {
 
   const isLocal      = item.mode === 'local';
   const accent       = isLocal ? C.local : C.duo;
-  const accentBg     = isLocal ? C.localLight : C.duoLight;
-  const accentBorder = isLocal ? C.localBorder : C.duoBorder;
+  const accentGlow   = isLocal ? C.localGlow : C.duoGlow;
 
   const authorName = [item.auteur?.prenom, item.auteur?.nom].filter(Boolean).join(' ') || 'Anonyme';
   const authorInitial = authorName[0]?.toUpperCase() || '?';
@@ -104,11 +106,17 @@ const PubCard = ({ item, onPress }) => {
     <Animated.View style={[styles.card, { transform: [{ scale: scaleAnim }] }]}>
       <TouchableOpacity activeOpacity={1} onPress={onPress} onPressIn={onPressIn} onPressOut={onPressOut}>
 
+        {/* Barre d'accent latérale */}
+        <View style={[styles.cardAccentBar, { backgroundColor: accent }]} />
+
         {/* ── Header : avatar + nom + temps + badge ── */}
         <View style={styles.cardHeader}>
-          <View style={[styles.cardAvatar, { backgroundColor: accent }]}>
+          <LinearGradient
+            colors={isLocal ? [C.local, '#28A745'] : [C.duo, '#0A6FCC']}
+            style={styles.cardAvatar}
+          >
             <Text style={styles.cardAvatarText}>{authorInitial}</Text>
-          </View>
+          </LinearGradient>
           <View style={{ flex: 1 }}>
             <Text style={styles.cardAuthorName} numberOfLines={1}>{authorName}</Text>
             <View style={styles.cardMetaRow}>
@@ -116,7 +124,7 @@ const PubCard = ({ item, onPress }) => {
               <Text style={styles.cardTime}>{timeAgo(item.createdAt)}</Text>
             </View>
           </View>
-          <View style={[styles.modeBadge, { backgroundColor: accentBg, borderColor: accentBorder }]}>
+          <View style={[styles.modeBadge, { backgroundColor: accentGlow, borderColor: accent }]}>
             <View style={[styles.modeDot, { backgroundColor: accent }]} />
             <Text style={[styles.modeText, { color: accent }]}>{isLocal ? 'LOCAL' : 'DUO'}</Text>
           </View>
@@ -161,8 +169,6 @@ const PubCard = ({ item, onPress }) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Écran principal
 // ─────────────────────────────────────────────────────────────────────────────
 export default function LocalScreen() {
@@ -187,6 +193,27 @@ export default function LocalScreen() {
   // ── Animation FAB ──────────────────────────────────────────────────────────
   const fabPulse    = useRef(new Animated.Value(1)).current;
   const fabAnim     = useRef(null);
+
+  // ── Animation point vert (header dot LOCAL) ────────────────────────────────
+  const dotScale        = useRef(new Animated.Value(1)).current;
+  const dotRippleScale  = useRef(new Animated.Value(0)).current;
+  const dotRippleOpacity = useRef(new Animated.Value(0)).current;
+
+  const handleGreenDotPress = () => {
+    dotRippleScale.setValue(0);
+    dotRippleOpacity.setValue(1);
+    Animated.parallel([
+      Animated.sequence([
+        Animated.spring(dotScale, { toValue: 1.6, useNativeDriver: true, tension: 250, friction: 5 }),
+        Animated.spring(dotScale, { toValue: 1,   useNativeDriver: true, tension: 180, friction: 8 }),
+      ]),
+      Animated.parallel([
+        Animated.timing(dotRippleScale,   { toValue: 3,   duration: 500, useNativeDriver: true }),
+        Animated.timing(dotRippleOpacity, { toValue: 0,   duration: 500, useNativeDriver: true }),
+      ]),
+    ]).start();
+    setModeFilter(modeFilter === 'local' ? 'all' : 'local');
+  };
 
   useEffect(() => {
     if (fabAnim.current) fabAnim.current.stop();
@@ -295,9 +322,15 @@ export default function LocalScreen() {
   };
 
   const handleTab = (key) => {
+    const item = TAB_ITEMS.find(t => t.key === key);
+    if (item?.authRequired && !currentUser) {
+      navigation.navigate('Login');
+      return;
+    }
     setActiveTab(key);
-    if (key === 'globe') navigation.navigate('Map');
-    if (key === 'profile') navigation.navigate('Profile');
+    if (key === 'globe')    navigation.navigate('Map');
+    if (key === 'messages') navigation.navigate('ConversationsList');
+    if (key === 'profile')  navigation.navigate('Profile');
   };
 
   const handleFabPress = () => {
@@ -325,261 +358,308 @@ export default function LocalScreen() {
   // Render
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <SafeAreaView style={styles.safe}>
-      <StatusBar style="dark" />
+    <DarkBackground style={{ flex: 1 }}>
+      <StatusBar style="light" />
 
-      {/* ── Header ── */}
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.7}>
-          <Text style={styles.backIcon}>←</Text>
-        </TouchableOpacity>
+      <SafeAreaView style={styles.safe}>
 
-        <View style={styles.searchBox}>
-          <Text style={styles.searchIcon}>🔍</Text>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search..."
-            placeholderTextColor="#B0B3C6"
-            value={search}
-            onChangeText={setSearch}
-          />
-          {search.length > 0 && (
-            <TouchableOpacity onPress={() => setSearch('')}>
-              <Text style={styles.clearBtn}>✕</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* Cercles LOCAL (vert) et DUO (bleu) — wireframe 003 header icons */}
-        <View style={styles.headerDots}>
-          <TouchableOpacity
-            onPress={() => setModeFilter(modeFilter === 'local' ? 'all' : 'local')}
-            activeOpacity={0.8}
-          >
-            <View style={[
-              styles.headerDot,
-              { backgroundColor: C.local },
-              modeFilter !== 'local' && styles.headerDotDimmed,
-            ]} />
+        {/* ── Header ── */}
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => navigation.navigate('Map')} activeOpacity={0.7}>
+            <Text style={styles.backIcon}>←</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => setModeFilter(modeFilter === 'duo' ? 'all' : 'duo')}
-            activeOpacity={0.8}
-          >
-            <View style={[
-              styles.headerDot,
-              { backgroundColor: C.duo },
-              modeFilter !== 'duo' && styles.headerDotDimmed,
-            ]} />
-          </TouchableOpacity>
-        </View>
 
-        <TouchableOpacity style={styles.menuBtn} onPress={openMenu} activeOpacity={0.8}>
-          <View style={styles.menuLine} />
-          <View style={[styles.menuLine, { width: 14 }]} />
-          <View style={styles.menuLine} />
-        </TouchableOpacity>
-      </View>
-
-      {/* ── Nom de la zone ── */}
-      <View style={styles.zoneRow}>
-        <View style={styles.zoneTitleRow}>
-          <Text style={styles.sectionTitle}>
-            {zoneName ? `📍 ${zoneName}` : 'Toutes les publications'}
-          </Text>
-          {hasNewPost && <View style={styles.greenDot} />}
-        </View>
-        {publications.length > 0 && (
-          <Text style={styles.zoneSubtitle}>
-            <Text style={styles.zoneSubLocal}>{localCount} local</Text>
-            {'  ·  '}
-            <Text style={styles.zoneSubDuo}>{duoCount} duo</Text>
-          </Text>
-        )}
-
-        {/* Pills filtre LOCAL / DUO / TOUS */}
-        <View style={styles.filterRow}>
-          <TouchableOpacity
-            style={[
-              styles.filterPill,
-              modeFilter === 'all'
-                ? { backgroundColor: C.dark, shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 5 }
-                : { backgroundColor: C.white, borderWidth: 1.5, borderColor: C.dark, opacity: 0.55 },
-            ]}
-            onPress={() => setModeFilter('all')}
-            activeOpacity={0.75}
-          >
-            <Text style={{ fontSize: 18 }}>🌐</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.filterPill,
-              { backgroundColor: C.local },
-              modeFilter === 'local' && { shadowColor: C.local, shadowOpacity: 0.45, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 5 },
-              modeFilter !== 'local' && { opacity: 0.55 },
-            ]}
-            onPress={() => setModeFilter(modeFilter === 'local' ? 'all' : 'local')}
-            activeOpacity={0.75}
-          >
-            <Text style={[styles.filterText, { color: C.white, fontWeight: '900' }]}>LOCAL</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.filterPill,
-              { backgroundColor: C.duo },
-              modeFilter === 'duo' && { shadowColor: C.duo, shadowOpacity: 0.45, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 5 },
-              modeFilter !== 'duo' && { opacity: 0.55 },
-            ]}
-            onPress={() => setModeFilter(modeFilter === 'duo' ? 'all' : 'duo')}
-            activeOpacity={0.75}
-          >
-            <Text style={[styles.filterText, { color: C.white, fontWeight: '900' }]}>DUO</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* ── Liste des publications ── */}
-      {loading ? (
-        <View style={styles.loaderBox}>
-          <ActivityIndicator size="large" color={C.duo} />
-          <Text style={styles.loaderText}>Chargement des publications…</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={filtered}
-          keyExtractor={(item) => item._id}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.duo} />
-          }
-          onEndReached={onEndReached}
-          onEndReachedThreshold={0.3}
-          ListFooterComponent={
-            loadingMore ? (
-              <ActivityIndicator style={{ marginVertical: 16 }} color={C.duo} />
-            ) : null
-          }
-          renderItem={({ item }) => (
-            <PubCard
-              item={item}
-              onPress={() => navigation.navigate('PublicationDetail', { publication: item })}
+          <View style={styles.searchBox}>
+            <Text style={styles.searchIcon}>🔍</Text>
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search..."
+              placeholderTextColor={C.textFaint}
+              value={search}
+              onChangeText={setSearch}
             />
-          )}
-          ListEmptyComponent={
-            <View style={styles.emptyBox}>
-              <Text style={styles.emptyIcon}>📭</Text>
-              <Text style={styles.emptyTitle}>Aucune publication</Text>
-              <Text style={styles.emptyText}>
-                {zoneName
-                  ? `Aucune publication dans la zone « ${zoneName} »`
-                  : 'Soyez le premier à publier !'}
-              </Text>
-            </View>
-          }
-        />
-      )}
-
-      {/* ── FAB + ── */}
-      <Animated.View style={[styles.fab, { transform: [{ scale: fabPulse }] }]}>
-        <TouchableOpacity
-          style={[
-            styles.fabInner,
-            modeFilter === 'local' && { backgroundColor: C.local },
-            modeFilter === 'duo'   && { backgroundColor: C.duo   },
-          ]}
-          activeOpacity={0.85}
-          onPress={handleFabPress}
-        >
-          <Text style={styles.fabIcon}>+</Text>
-        </TouchableOpacity>
-      </Animated.View>
-
-      {/* ── Bottom Tab Bar ── */}
-      <View style={styles.tabBar}>
-        {TAB_ITEMS.map((tab) => {
-          const isActive = activeTab === tab.key;
-          return (
-            <TouchableOpacity key={tab.key} style={styles.tabItem} onPress={() => handleTab(tab.key)} activeOpacity={0.8}>
-              <View style={[styles.tabIconBox, isActive && styles.tabIconBoxActive]}>
-                <Text style={[styles.tabIcon, isActive && styles.tabIconActive]}>{tab.icon}</Text>
-              </View>
-              <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>{tab.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      {/* ════════ MENU LATÉRAL ════════ */}
-      {menuOpen && (
-        <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-          <Animated.View style={[styles.menuOverlay, { opacity: overlayAnim }]}>
-            <TouchableWithoutFeedback onPress={closeMenu}>
-              <View style={StyleSheet.absoluteFill} />
-            </TouchableWithoutFeedback>
-          </Animated.View>
-
-          <Animated.View style={[styles.menuPanel, { transform: [{ translateX: menuAnim }] }]}>
-            <View style={styles.menuHeader}>
-              <View style={styles.menuLogo}>
-                <Text style={styles.menuLogoText}>📍</Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.menuAppName}>ByMap</Text>
-                <Text style={styles.menuAppSub}>{currentUser ? '✅ Connecté' : '🔒 Non connecté'}</Text>
-              </View>
-              <TouchableOpacity style={styles.menuClose} onPress={closeMenu}>
-                <Text style={styles.menuCloseIcon}>✕</Text>
-              </TouchableOpacity>
-            </View>
-
-            {currentUser ? (
-              <View style={styles.menuUserCard}>
-                <Text style={styles.menuUserAvatar}>👤</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.menuUserName}>{currentUser.prenom || ''} {currentUser.nom || ''}</Text>
-                  <Text style={styles.menuUserEmail} numberOfLines={1}>{currentUser.email || currentUser.phone || ''}</Text>
-                </View>
-              </View>
-            ) : (
-              <TouchableOpacity
-                style={styles.menuLoginBanner}
-                onPress={() => { closeMenu(); navigation.navigate('Login'); }}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.menuLoginBannerText}>Se connecter / S'inscrire →</Text>
+            {search.length > 0 && (
+              <TouchableOpacity onPress={() => setSearch('')}>
+                <Text style={styles.clearBtn}>✕</Text>
               </TouchableOpacity>
             )}
+          </View>
 
-            <ScrollView style={styles.menuItemsList} showsVerticalScrollIndicator={false}>
-              {MENU_ITEMS.map((item) => {
-                if (item.key === 'logout' && !currentUser) return null;
-                return (
-                  <TouchableOpacity
-                    key={item.key}
-                    style={[styles.menuItem, item.danger && styles.menuItemDanger]}
-                    onPress={() => handleMenuItem(item.key)}
-                    activeOpacity={0.75}
-                  >
-                    <Text style={styles.menuItemIcon}>{item.icon}</Text>
-                    <Text style={[styles.menuItemLabel, item.danger && styles.menuItemLabelDanger]}>
-                      {item.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-            <Text style={styles.menuFooter}>ByMap v1.0.0</Text>
-          </Animated.View>
+          {/* Cercles LOCAL (vert) et DUO (bleu) — header dots */}
+          <View style={styles.headerDots}>
+            <TouchableOpacity onPress={handleGreenDotPress} activeOpacity={0.8}>
+              <View style={{ width: 18, height: 18, alignItems: 'center', justifyContent: 'center' }}>
+                {/* Ripple ring */}
+                <Animated.View style={{
+                  position: 'absolute',
+                  width: 18, height: 18, borderRadius: 9,
+                  borderWidth: 2, borderColor: C.local,
+                  opacity: dotRippleOpacity,
+                  transform: [{ scale: dotRippleScale }],
+                }} />
+                {/* Dot */}
+                <Animated.View style={[
+                  styles.headerDot,
+                  { backgroundColor: C.local },
+                  modeFilter !== 'local' && styles.headerDotDimmed,
+                  { transform: [{ scale: dotScale }] },
+                ]} />
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setModeFilter(modeFilter === 'duo' ? 'all' : 'duo')}
+              activeOpacity={0.8}
+            >
+              <View style={[
+                styles.headerDot,
+                { backgroundColor: C.duo },
+                modeFilter !== 'duo' && styles.headerDotDimmed,
+              ]} />
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity style={styles.menuBtn} onPress={openMenu} activeOpacity={0.8}>
+            <View style={styles.menuLine} />
+            <View style={[styles.menuLine, { width: 14 }]} />
+            <View style={styles.menuLine} />
+          </TouchableOpacity>
         </View>
-      )}
-    </SafeAreaView>
+
+        {/* ── Nom de la zone ── */}
+        <View style={styles.zoneRow}>
+          <View style={styles.zoneTitleRow}>
+            <Text style={styles.sectionTitle}>
+              {zoneName ? `📍 ${zoneName}` : 'Toutes les publications'}
+            </Text>
+            {hasNewPost && <View style={styles.greenDot} />}
+          </View>
+          {publications.length > 0 && (
+            <Text style={styles.zoneSubtitle}>
+              <Text style={styles.zoneSubLocal}>{localCount} local</Text>
+              {'  ·  '}
+              <Text style={styles.zoneSubDuo}>{duoCount} duo</Text>
+            </Text>
+          )}
+
+          {/* Pills filtre LOCAL / DUO / TOUS */}
+          <View style={styles.filterRow}>
+            <TouchableOpacity
+              style={[
+                styles.filterPill,
+                modeFilter === 'all'
+                  ? { backgroundColor: C.glassMid, borderColor: C.glassBorder, borderWidth: 1 }
+                  : { backgroundColor: C.glass,    borderColor: C.glassBorder, borderWidth: 1, opacity: 0.6 },
+              ]}
+              onPress={() => setModeFilter('all')}
+              activeOpacity={0.75}
+            >
+              <Text style={{ fontSize: 18 }}>🌐</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.filterPill,
+                modeFilter === 'local'
+                  ? { backgroundColor: C.localGlow, borderColor: C.local, borderWidth: 1.5, shadowColor: C.local, shadowOpacity: 0.5, shadowRadius: 8, elevation: 5 }
+                  : { backgroundColor: C.glass,     borderColor: C.glassBorder, borderWidth: 1, opacity: 0.6 },
+              ]}
+              onPress={() => setModeFilter(modeFilter === 'local' ? 'all' : 'local')}
+              activeOpacity={0.75}
+            >
+              <Text style={[styles.filterText, { color: C.local, fontWeight: '900' }]}>LOCAL</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.filterPill,
+                modeFilter === 'duo'
+                  ? { backgroundColor: C.duoGlow, borderColor: C.duo, borderWidth: 1.5, shadowColor: C.duo, shadowOpacity: 0.5, shadowRadius: 8, elevation: 5 }
+                  : { backgroundColor: C.glass,   borderColor: C.glassBorder, borderWidth: 1, opacity: 0.6 },
+              ]}
+              onPress={() => setModeFilter(modeFilter === 'duo' ? 'all' : 'duo')}
+              activeOpacity={0.75}
+            >
+              <Text style={[styles.filterText, { color: C.duo, fontWeight: '900' }]}>DUO</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* ── Liste des publications ── */}
+        {loading ? (
+          <View style={styles.loaderBox}>
+            <ActivityIndicator size="large" color={C.duo} />
+            <Text style={styles.loaderText}>Chargement des publications…</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={filtered}
+            keyExtractor={(item) => item._id}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.duo} />
+            }
+            onEndReached={onEndReached}
+            onEndReachedThreshold={0.3}
+            ListFooterComponent={
+              loadingMore ? (
+                <ActivityIndicator style={{ marginVertical: 16 }} color={C.duo} />
+              ) : null
+            }
+            renderItem={({ item }) => (
+              <PubCard
+                item={item}
+                onPress={() => navigation.navigate('PublicationDetail', { publication: item })}
+              />
+            )}
+            ListEmptyComponent={
+              <View style={styles.emptyBox}>
+                <Text style={styles.emptyIcon}>📭</Text>
+                <Text style={styles.emptyTitle}>Aucune publication</Text>
+                <Text style={styles.emptyText}>
+                  {zoneName
+                    ? `Aucune publication dans la zone « ${zoneName} »`
+                    : 'Soyez le premier à publier !'}
+                </Text>
+              </View>
+            }
+          />
+        )}
+
+        {/* ── FAB + ── */}
+        <Animated.View style={[
+          styles.fab,
+          modeFilter === 'local' && { shadowColor: C.local, shadowOpacity: 0.5 },
+          modeFilter === 'duo'   && { shadowColor: C.duo,   shadowOpacity: 0.5 },
+          { transform: [{ scale: fabPulse }] },
+        ]}>
+          <TouchableOpacity
+            style={[
+              styles.fabInner,
+              modeFilter === 'local' && { backgroundColor: C.local },
+              modeFilter === 'duo'   && { backgroundColor: C.duo   },
+            ]}
+            activeOpacity={0.85}
+            onPress={handleFabPress}
+          >
+            <Text style={styles.fabIcon}>+</Text>
+          </TouchableOpacity>
+        </Animated.View>
+
+        {/* ── Bottom Tab Bar ── */}
+        <View style={styles.tabBar}>
+          {TAB_ITEMS.map((tab) => {
+            const isActive  = activeTab === tab.key;
+            const isLocked  = tab.authRequired && !currentUser;
+            return (
+              <TouchableOpacity
+                key={tab.key}
+                style={[styles.tabItem, isLocked && { opacity: 0.35 }]}
+                onPress={() => handleTab(tab.key)}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.tabIconBox, isActive && !isLocked && styles.tabIconBoxActive]}>
+                  <Text style={[styles.tabIcon, isActive && !isLocked && styles.tabIconActive]}>
+                    {tab.icon}
+                  </Text>
+                </View>
+                <Text style={[styles.tabLabel, isActive && !isLocked && styles.tabLabelActive]}>
+                  {tab.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {/* ════════ MENU LATÉRAL ════════ */}
+        {menuOpen && (
+          <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+            <Animated.View style={[styles.menuOverlay, { opacity: overlayAnim }]}>
+              <TouchableWithoutFeedback onPress={closeMenu}>
+                <View style={StyleSheet.absoluteFill} />
+              </TouchableWithoutFeedback>
+            </Animated.View>
+
+            <Animated.View style={[styles.menuPanel, { transform: [{ translateX: menuAnim }] }]}>
+              <View style={styles.menuHeader}>
+                <View style={styles.menuLogo}>
+                  <Text style={styles.menuLogoText}>📍</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.menuAppName}>ByMap</Text>
+                  <Text style={[styles.menuAppSub, { color: currentUser ? C.local : '#FF6B6B' }]}>
+                    {currentUser ? '✅ Connecté' : '🔒 Non connecté'}
+                  </Text>
+                </View>
+                <TouchableOpacity style={styles.menuClose} onPress={closeMenu}>
+                  <Text style={styles.menuCloseIcon}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              {currentUser ? (
+                <View style={styles.menuUserCard}>
+                  <Text style={styles.menuUserAvatar}>👤</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.menuUserName}>{currentUser.prenom || ''} {currentUser.nom || ''}</Text>
+                    <Text style={styles.menuUserEmail} numberOfLines={1}>{currentUser.email || currentUser.phone || ''}</Text>
+                  </View>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.menuLoginBanner}
+                  onPress={() => { closeMenu(); navigation.navigate('Login'); }}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.menuLoginBannerText}>Se connecter / S'inscrire →</Text>
+                </TouchableOpacity>
+              )}
+
+              <ScrollView style={styles.menuItemsList} showsVerticalScrollIndicator={false}>
+                {MENU_ITEMS.map((item) => {
+                  if (item.key === 'logout' && !currentUser) return null;
+                  return (
+                    <TouchableOpacity
+                      key={item.key}
+                      style={[styles.menuItem, item.danger && styles.menuItemDanger]}
+                      onPress={() => handleMenuItem(item.key)}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={styles.menuItemIcon}>{item.icon}</Text>
+                      <Text style={[styles.menuItemLabel, item.danger && styles.menuItemLabelDanger]}>
+                        {item.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+              <Text style={styles.menuFooter}>ByMap v1.0.0</Text>
+            </Animated.View>
+          </View>
+        )}
+
+      </SafeAreaView>
+    </DarkBackground>
   );
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────────
+// ── Styles — thème sombre (identique LoginScreen) ─────────────────────────────
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: C.bg },
+  safe: { flex: 1, backgroundColor: 'transparent' },
+
+  // ── Blobs décoratifs (identiques au LoginScreen)
+  blobTopRight: {
+    position: 'absolute', borderRadius: 999,
+    width: 300, height: 300, top: -80, right: -80,
+    backgroundColor: 'rgba(30,144,255,0.25)',
+  },
+  blobBottomLeft: {
+    position: 'absolute', borderRadius: 999,
+    width: 260, height: 260, bottom: -60, left: -70,
+    backgroundColor: 'rgba(52,199,89,0.22)',
+  },
+  blobCenter: {
+    position: 'absolute', borderRadius: 999,
+    width: 180, height: 180, top: '35%', left: '20%',
+    backgroundColor: 'rgba(120,60,220,0.18)',
+  },
 
   // ── Header
   header: {
@@ -588,64 +668,63 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     paddingTop: 38,
-    backgroundColor: C.white,
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderBottomWidth: 1,
-    borderBottomColor: C.border,
+    borderBottomColor: 'rgba(255,255,255,0.10)',
     gap: 8,
   },
   backBtn: {
     width: 36, height: 36, borderRadius: 18,
-    backgroundColor: '#F0F1F8',
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)',
     justifyContent: 'center', alignItems: 'center',
   },
-  backIcon: { fontSize: 18, color: C.dark, fontWeight: '600' },
+  backIcon: { fontSize: 18, color: C.white, fontWeight: '600' },
   searchBox: {
     flex: 1,
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#F0F1F8',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.14)',
     borderRadius: 22, paddingHorizontal: 12, paddingVertical: 9, gap: 6,
   },
   searchIcon:  { fontSize: 13 },
-  searchInput: { flex: 1, fontSize: 14, color: C.dark, padding: 0 },
-  clearBtn:    { color: '#aaa', fontSize: 13, paddingHorizontal: 2 },
+  searchInput: { flex: 1, fontSize: 14, color: C.white, padding: 0 },
+  clearBtn:    { color: C.textFaint, fontSize: 13, paddingHorizontal: 2 },
 
   // Cercles LOCAL/DUO dans le header
-  headerDots: { flexDirection: 'row', gap: 6, alignItems: 'center' },
-  headerDot: {
-    width: 18, height: 18, borderRadius: 9,
-  },
-  headerDotDimmed: { opacity: 0.3 },
+  headerDots:     { flexDirection: 'row', gap: 6, alignItems: 'center' },
+  headerDot:      { width: 18, height: 18, borderRadius: 9 },
+  headerDotDimmed:{ opacity: 0.3 },
 
   menuBtn: {
     width: 36, height: 36, borderRadius: 10,
-    backgroundColor: '#F0F1F8',
+    backgroundColor: C.duo,
     justifyContent: 'center', alignItems: 'center',
     gap: 4, paddingVertical: 8,
+    shadowColor: C.duo, shadowOpacity: 0.4, shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 }, elevation: 6,
   },
-  menuLine: { width: 20, height: 2, backgroundColor: C.dark, borderRadius: 2 },
+  menuLine: { width: 20, height: 2, backgroundColor: C.white, borderRadius: 2 },
 
   // ── Zone + filtres
   zoneRow: {
-    backgroundColor: C.white,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)',
     paddingHorizontal: 16,
     paddingTop: 10,
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: C.border,
+    paddingBottom: 14,
     gap: 8,
   },
   sectionTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '900',
-    color: C.dark,
+    color: C.white,
     letterSpacing: 0.3,
   },
-  filterRow: {
-    flexDirection: 'row', gap: 8,
-  },
+  filterRow: { flexDirection: 'row', gap: 8 },
   filterPill: {
-    paddingHorizontal: 16, paddingVertical: 8,
-    borderRadius: 20, borderWidth: 0,
+    paddingHorizontal: 18, paddingVertical: 9,
+    borderRadius: 24,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
@@ -656,7 +735,7 @@ const styles = StyleSheet.create({
 
   // ── Loader
   loaderBox:  { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
-  loaderText: { fontSize: 14, color: C.grey },
+  loaderText: { fontSize: 14, color: C.textDim },
 
   // ── Liste
   listContent: {
@@ -666,34 +745,38 @@ const styles = StyleSheet.create({
     gap: 12,
   },
 
-  // ── Card
+  // ── Card (glassmorphism)
   card: {
-    backgroundColor: C.white,
-    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.09)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)',
+    borderRadius: 20,
     overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.07,
-    shadowRadius: 8,
-    elevation: 3,
-    borderWidth: 1,
-    borderColor: C.border,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  cardAccentBar: {
+    position: 'absolute', left: 0, top: 0, bottom: 0,
+    width: 3, borderRadius: 2,
   },
 
   // Header : avatar + auteur + temps + badge
   cardHeader: {
     flexDirection: 'row', alignItems: 'center',
-    gap: 10, padding: 12, paddingBottom: 8,
+    gap: 10,
+    paddingLeft: 18, paddingRight: 14, paddingTop: 14, paddingBottom: 10,
   },
   cardAvatar: {
-    width: 40, height: 40, borderRadius: 20,
+    width: 42, height: 42, borderRadius: 21,
     justifyContent: 'center', alignItems: 'center',
   },
   cardAvatarText: { color: C.white, fontWeight: '800', fontSize: 16 },
-  cardAuthorName: { fontSize: 14, fontWeight: '700', color: C.dark },
+  cardAuthorName: { fontSize: 14, fontWeight: '700', color: C.white },
   cardMetaRow:    { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
-  cardLocation:   { fontSize: 11, color: C.grey, flex: 1 },
-  cardTime:       { fontSize: 11, color: C.grey, fontWeight: '500' },
+  cardLocation:   { fontSize: 11, color: C.textDim, flex: 1 },
+  cardTime:       { fontSize: 11, color: C.textFaint, fontWeight: '500' },
 
   // Badge LOCAL / DUO
   modeBadge: {
@@ -707,54 +790,59 @@ const styles = StyleSheet.create({
 
   // Description
   cardDesc: {
-    fontSize: 13, color: '#444',
-    lineHeight: 20,
-    paddingHorizontal: 12, paddingBottom: 10,
+    fontSize: 14, color: C.textDim,
+    lineHeight: 22,
+    paddingLeft: 18, paddingRight: 14, paddingBottom: 10,
   },
 
   // Image
   cardImageWrap: {
-    width: '100%', height: 200, overflow: 'hidden',
+    marginHorizontal: 12, marginBottom: 4,
+    borderRadius: 12, overflow: 'hidden',
+    height: 200,
   },
   cardImage: { width: '100%', height: '100%' },
   cardImageLoader: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
     justifyContent: 'center', alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.06)',
+    backgroundColor: 'rgba(0,0,0,0.18)',
   },
   cardImagePlaceholder: {},
   cardImageIcon:        {},
   cardImageHint:        {},
 
-  // Ligne localisation (conservé pour compatibilité)
-  locLine: { fontSize: 11, color: C.grey },
+  locLine: { fontSize: 11, color: C.textFaint },
 
   // Footer : likes + vues
   cardFooter: {
     flexDirection: 'row', alignItems: 'center',
-    gap: 14, paddingHorizontal: 12, paddingVertical: 10,
-    borderTopWidth: 1, borderTopColor: C.border,
+    gap: 14, paddingLeft: 18, paddingRight: 14, paddingVertical: 10,
+    borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(0,0,0,0.12)',
   },
-  cardAuthor:   { fontSize: 12, color: C.grey, fontWeight: '500', flex: 1 },
+  cardAuthor:   { fontSize: 12, color: C.textDim, fontWeight: '500', flex: 1 },
   cardMeta:     { flexDirection: 'row', gap: 10 },
-  cardMetaText: { fontSize: 12, color: C.grey, fontWeight: '500' },
+  cardMetaText: { fontSize: 12, color: C.textDim, fontWeight: '500' },
 
   // ── Empty
   emptyBox:   { alignItems: 'center', paddingTop: 60, gap: 10 },
-  emptyIcon:  { fontSize: 48 },
-  emptyTitle: { fontSize: 16, fontWeight: '700', color: '#555' },
-  emptyText:  { fontSize: 13, color: '#aaa', textAlign: 'center', paddingHorizontal: 32 },
+  emptyIcon:  { fontSize: 52 },
+  emptyTitle: { fontSize: 18, fontWeight: '800', color: C.white },
+  emptyText:  { fontSize: 14, color: C.textDim, lineHeight: 22, textAlign: 'center', paddingHorizontal: 32 },
 
   // ── FAB
   fab: {
     position: 'absolute', bottom: 88, right: 24,
     width: 56, height: 56, borderRadius: 28,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35, shadowRadius: 10, elevation: 10,
+    shadowColor: '#1a1a2e',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    elevation: 12,
   },
   fabInner: {
     width: 56, height: 56, borderRadius: 28,
-    backgroundColor: C.dark,
+    backgroundColor: C.navyLight,
     justifyContent: 'center', alignItems: 'center',
   },
   fabIcon: { fontSize: 28, color: C.white, fontWeight: '300', lineHeight: 32 },
@@ -762,58 +850,63 @@ const styles = StyleSheet.create({
   // ── Bottom Tab Bar
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: C.white,
-    borderTopWidth: 1, borderTopColor: C.border,
-    paddingBottom: 6, paddingTop: 8,
+    backgroundColor: 'rgba(10,22,40,0.92)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.10)',
+    paddingBottom: 8,
+    paddingTop: 10,
   },
   tabItem:          { flex: 1, alignItems: 'center', gap: 4 },
-  tabIconBox:       { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center', backgroundColor: 'transparent' },
-  tabIconBoxActive: { backgroundColor: C.dark },
+  tabIconBox:       { width: 36, height: 36, borderRadius: 12, justifyContent: 'center', alignItems: 'center', backgroundColor: 'transparent' },
+  tabIconBoxActive: { backgroundColor: 'rgba(30,144,255,0.18)' },
   tabIcon:          { fontSize: 18 },
   tabIconActive:    { fontSize: 18 },
-  tabLabel:         { fontSize: 11, color: '#999', fontWeight: '500' },
-  tabLabelActive:   { color: C.dark, fontWeight: '700' },
+  tabLabel:         { fontSize: 11, color: C.textFaint, fontWeight: '500' },
+  tabLabelActive:   { color: C.duo, fontWeight: '700' },
 
   // ════ MENU LATÉRAL ════
-  menuOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)' },
+  menuOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(10,16,40,0.75)' },
   menuPanel: {
     position: 'absolute', top: 0, bottom: 0, right: 0,
-    width: width * 0.72, backgroundColor: C.white,
+    width: width * 0.72, backgroundColor: C.navy,
     shadowColor: '#000', shadowOffset: { width: -4, height: 0 },
-    shadowOpacity: 0.15, shadowRadius: 20, elevation: 20,
+    shadowOpacity: 0.35, shadowRadius: 20, elevation: 20,
   },
   menuHeader: {
     flexDirection: 'row', alignItems: 'center',
     paddingTop: 54, paddingBottom: 20, paddingHorizontal: 20,
-    borderBottomWidth: 1, borderBottomColor: C.border, gap: 12,
+    backgroundColor: C.navyMid,
+    gap: 12,
   },
   menuLogo: {
     width: 44, height: 44, borderRadius: 14,
-    backgroundColor: '#1E90FF18',
+    backgroundColor: 'rgba(30,144,255,0.15)',
     justifyContent: 'center', alignItems: 'center',
   },
   menuLogoText: { fontSize: 22 },
-  menuAppName:  { fontSize: 17, fontWeight: '800', color: C.dark, letterSpacing: -0.3 },
-  menuAppSub:   { fontSize: 12, color: C.grey, marginTop: 1 },
+  menuAppName:  { fontSize: 17, fontWeight: '800', color: C.white, letterSpacing: -0.3 },
+  menuAppSub:   { fontSize: 12, marginTop: 1 },
   menuClose: {
     marginLeft: 'auto', width: 30, height: 30, borderRadius: 15,
-    backgroundColor: '#F0F1F8', justifyContent: 'center', alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center',
   },
-  menuCloseIcon:  { fontSize: 13, color: '#555', fontWeight: '700' },
+  menuCloseIcon:  { fontSize: 13, color: C.white, fontWeight: '700' },
   menuUserCard: {
     flexDirection: 'row', alignItems: 'center',
     marginHorizontal: 16, marginTop: 16,
-    backgroundColor: '#F5F6FA', borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 14,
     paddingVertical: 12, paddingHorizontal: 14, gap: 12,
-    borderWidth: 1, borderColor: C.border,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
   },
   menuUserAvatar: { fontSize: 28 },
-  menuUserName:   { fontSize: 15, fontWeight: '700', color: C.dark },
-  menuUserEmail:  { fontSize: 12, color: C.grey, marginTop: 2 },
+  menuUserName:   { fontSize: 15, fontWeight: '700', color: C.white },
+  menuUserEmail:  { fontSize: 12, color: C.textFaint, marginTop: 2 },
   menuLoginBanner: {
     marginHorizontal: 16, marginTop: 16,
     backgroundColor: C.duo, borderRadius: 12,
     paddingVertical: 13, alignItems: 'center',
+    shadowColor: C.duo, shadowOpacity: 0.35, shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 }, elevation: 6,
   },
   menuLoginBannerText: { color: C.white, fontWeight: '700', fontSize: 14 },
   menuItemsList:  { flex: 1, paddingTop: 12 },
@@ -823,11 +916,11 @@ const styles = StyleSheet.create({
     borderRadius: 12, marginHorizontal: 8, marginBottom: 2,
   },
   menuItemDanger:      { marginTop: 8 },
-  menuItemIcon:        { fontSize: 20, width: 28, textAlign: 'center' },
-  menuItemLabel:       { fontSize: 15, color: '#222', fontWeight: '600' },
-  menuItemLabelDanger: { color: '#FF3B30' },
+  menuItemIcon:        { fontSize: 22, width: 28, textAlign: 'center' },
+  menuItemLabel:       { fontSize: 15, color: C.white, fontWeight: '600' },
+  menuItemLabelDanger: { color: '#FF6B6B' },
   menuFooter: {
-    textAlign: 'center', color: '#ccc',
+    textAlign: 'center', color: C.textFaint,
     fontSize: 12, paddingBottom: 32, paddingTop: 12,
   },
 
@@ -837,10 +930,9 @@ const styles = StyleSheet.create({
     width: 10, height: 10, borderRadius: 5,
     backgroundColor: C.local,
     shadowColor: C.local, shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8, shadowRadius: 4, elevation: 4,
+    shadowOpacity: 0.9, shadowRadius: 6, elevation: 4,
   },
-  zoneSubtitle: { fontSize: 12, color: C.grey, fontWeight: '600', marginTop: 1 },
+  zoneSubtitle: { fontSize: 12, color: C.textDim, fontWeight: '600', marginTop: 1 },
   zoneSubLocal: { color: C.local, fontWeight: '700' },
   zoneSubDuo:   { color: C.duo,   fontWeight: '700' },
-
 });

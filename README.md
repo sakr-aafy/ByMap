@@ -15,6 +15,7 @@ Réseau social de proximité pour partager des publications locales et des traje
 - [API Endpoints](#api-endpoints)
 - [Variables d'environnement](#variables-denvironnement)
 - [Installation & Lancement](#installation--lancement)
+- [Modifications récentes](#modifications-récentes)
 
 ---
 
@@ -43,6 +44,7 @@ ByMap est une application mobile React Native permettant aux utilisateurs de :
 | Upload médias | Multer + Cloudinary (optionnel) |
 | Email | Nodemailer (Gmail SMTP) |
 | Cache | AsyncStorage + mémoire (frontend) |
+| Temps réel | Socket.IO |
 
 ---
 
@@ -57,45 +59,53 @@ ByMap/
 │   ├── package.json
 │   ├── assets/
 │   │   ├── logo.png            # Logo de l'application
-│   │   └── tunisia.json        # Données géographiques (gouvernorats, délégations, localités)
+│   │   └── tunisia.json        # 4868 localités avec coordonnées GPS (lat/lng)
 │   └── src/
 │       ├── environments/
 │       │   ├── environment.js         # Config développement
 │       │   └── environment.prod.ts    # Config production
 │       ├── screens/
-│       │   ├── Welcome.js             # Splash screen
+│       │   ├── Welcome.js             # Splash screen (logo + barre de chargement)
 │       │   ├── LoginScreen.js         # Authentification
 │       │   ├── MapScreen.js           # Carte principale
 │       │   ├── LocalScreen.js         # Feed publications
 │       │   ├── ProfileScreen.js       # Profil utilisateur
 │       │   ├── AjoutPub.js            # Créer une publication
 │       │   ├── PublicationDetail.js   # Détail d'une publication
-│       │   └── admin/
-│       │       └── AdminDashboard.js  # Panel admin
+│       │   ├── ConversationsList.js   # Liste des conversations
+│       │   ├── Messages.js            # Messagerie en temps réel
+│       │   ├── CallScreen.js          # Écran d'appel
+│       │   └── ForgetPassword.js      # Réinitialisation mot de passe
+│       ├── theme/
+│       │   └── index.js               # Design tokens partagés (couleurs, ombres)
 │       └── utils/
 │           ├── api.js                 # Appels HTTP + gestion session
 │           └── cache.js               # Cache geocodage + recherche
 │
 └── backend/                    # API Node.js
-    ├── server.js               # Point d'entrée
+    ├── server.js               # Point d'entrée (Express + Socket.IO)
     ├── .env                    # Variables d'environnement
     ├── package.json
+    ├── uploads/                # Médias uploadés en local
     └── src/
         ├── config/
         │   ├── db.js           # Connexion MongoDB
         │   └── db.config.js
         ├── models/
         │   ├── User.model.js
-        │   └── Publication.model.js
+        │   ├── Publication.model.js
+        │   └── Message.model.js
         ├── controllers/
         │   ├── auth.controller.js
         │   ├── profile.controller.js
         │   ├── publication.controller.js
+        │   ├── message.controller.js
         │   └── admin.controller.js
         ├── routes/
         │   ├── auth.routes.js
         │   ├── user.routes.js
         │   ├── publication.routes.js
+        │   ├── message.routes.js
         │   └── admin.routes.js
         ├── middleware/
         │   ├── auth.middleware.js     # JWT protect + adminOnly
@@ -112,14 +122,17 @@ ByMap/
 
 ```
 Stack Navigator
-├── Welcome           → Splash animé (3s) → redirige vers Map
+├── Welcome           → Splash (logo + barre de chargement) → redirige vers Map
 ├── Map               → Carte principale
 ├── Login             → Connexion / Inscription
 ├── Local             → Feed des publications
 ├── Profile           → Profil utilisateur
 ├── AdminDashboard    → Tableau de bord admin
 ├── AjoutePub         → Formulaire de publication
-└── PublicationDetail → Détail d'une publication
+├── PublicationDetail → Détail d'une publication
+├── ConversationsList → Liste des conversations
+├── Messages          → Messagerie
+└── ForgetPassword    → Réinitialisation mot de passe
 ```
 
 ---
@@ -127,9 +140,11 @@ Stack Navigator
 ### Écrans
 
 #### Welcome.js
-- Splash screen avec logo animé et barre de progression
-- Animation fade-in + LinearGradient sombre
-- Redirige automatiquement vers **Map** après 3 secondes
+- Splash screen minimaliste : **logo centré** + **barre de chargement** uniquement
+- Animation fade-in + scale du logo au démarrage
+- Barre de progression dégradé vert → bleu (3 secondes)
+- Redirige automatiquement vers **Map** après 3,2 secondes
+- Fond gradient sombre `#0a1628 → #0f2040`
 
 ---
 
@@ -157,9 +172,12 @@ Stack Navigator
 - Joystick style Radio Garden pour déplacer la carte
 - Détection automatique de la zone (gouvernorat) via Nominatim
 - Bandeau nom de zone centré sous la barre de recherche
-- Points verts par gouvernorat avec compteurs local/duo
+- **Points verts par zone** (délégation / ville / gouvernorat) avec compteurs local/duo
+- Coordonnées des zones résolues depuis `tunisia.json` (hors ligne, instantané)
+- **Pull-to-refresh** (glisser vers le bas depuis le haut) pour actualiser les points
 - Crosshair cliquable → navigue vers LocalScreen avec la zone
 - Footer navbar : Globe (actif) | Logo + badge total posts | Profil
+- **Bouton Profil** : redirige vers Login si non connecté, vers Profile si connecté
 - Menu déroulant : profil, sélecteur de style, langue, connexion/déconnexion
 
 **États internes :**
@@ -170,6 +188,7 @@ detectedZone  : string   (gouvernorat détecté)
 cityName      : string   (ville détectée)
 zoneCounts    : { local: number, duo: number }
 pickMode      : boolean  (mode sélection zone admin)
+refreshingDots: boolean  (chargement points en cours)
 ```
 
 ---
@@ -177,7 +196,8 @@ pickMode      : boolean  (mode sélection zone admin)
 #### LocalScreen.js
 - Feed des publications avec filtres : **Tous / LOCAL / DUO**
 - Filtre LOCAL → fond vert | Filtre DUO → fond bleu
-- Bouton FAB : change de couleur et pulse lors du filtrage (vert/bleu)
+- **Bouton point vert (header)** : animation bounce + ripple au clic
+  - Spring scale 1 → 1,6 → 1 avec onde de propagation qui s'estompe
 - **PubCard** — carte de publication :
 
 ```
@@ -238,12 +258,17 @@ pickMode      : boolean  (mode sélection zone admin)
 
 ---
 
-#### AdminDashboard.js
-- Statistiques globales (utilisateurs, lieux actifs)
-- Liste des catégories (8 prédéfinies)
-- Tableau des utilisateurs récents avec statuts (actif / bloqué / en attente)
-- Modal d'ajout de lieu (nom, adresse, catégorie, coordonnées)
-- Gestion utilisateurs : voir / bloquer / supprimer
+#### ConversationsList.js
+- Liste des conversations actives de l'utilisateur connecté
+- Temps du dernier message relatif
+- Navigation vers l'écran Messages
+
+---
+
+#### Messages.js
+- Messagerie en temps réel via **Socket.IO**
+- Bulles de messages envoyés / reçus
+- Envoi de texte + horodatage
 
 ---
 
@@ -271,6 +296,11 @@ Cache à deux niveaux : **mémoire session** + **AsyncStorage persistant**
 | `cachedZone(lat, lng, fn)` | 7 jours |
 | `cachedSearch(query, fn)` | 1 heure |
 
+#### src/theme/index.js
+Design tokens partagés entre les écrans :
+- Couleurs (`D.navy`, `D.blue`, `D.green`, …)
+- Ombres (`shadow`)
+
 ---
 
 ### Dépendances Frontend
@@ -295,7 +325,8 @@ Cache à deux niveaux : **mémoire session** + **AsyncStorage persistant**
 "react-native-screens": "~4.4.0",
 "react-native-vector-icons": "^10.3.0",
 "axios": "^1.8.4",
-"@react-native-picker/picker": "2.9.0"
+"@react-native-picker/picker": "2.9.0",
+"socket.io-client": "^4.x"
 ```
 
 ---
@@ -311,11 +342,13 @@ server.js
 ├── cors()               → CLIENT_URL=*
 ├── express.json()
 ├── morgan('dev')        → Logs
+├── Socket.IO            → Messagerie temps réel
 ├── /uploads             → Fichiers statiques (dev)
 ├── /api/auth            → authRoutes
 ├── /api/users           → userRoutes
 ├── /api/admin           → adminRoutes
 ├── /api/publications    → publicationRoutes
+├── /api/messages        → messageRoutes
 ├── /health              → GET { status: 'OK' }
 ├── 404 handler
 └── Error handler global
@@ -331,6 +364,7 @@ mongoose
 jsonwebtoken, bcryptjs
 multer, cloudinary
 nodemailer
+socket.io
 dotenv
 nodemon (dev)
 ```
@@ -351,10 +385,6 @@ nodemon (dev)
   role:             'user' | 'admin'       (défaut: 'user'),
   isActive:         Boolean                (défaut: true),
   refreshToken:     String,
-
-  googleId:         String,
-  facebookId:       String,
-  appleId:          String,
 
   avatarUrl:        String,
   lastLogin:        Date,
@@ -421,6 +451,21 @@ nodemon (dev)
 
 ---
 
+### Modèle Message
+
+```javascript
+{
+  conversationId: String,
+  expediteur:     ObjectId → User,
+  destinataire:   ObjectId → User,
+  contenu:        String,
+  lu:             Boolean (défaut: false),
+  createdAt, updatedAt (timestamps)
+}
+```
+
+---
+
 ## API Endpoints
 
 ### Auth — `/api/auth`
@@ -456,6 +501,7 @@ nodemon (dev)
 | Méthode | Route | Description | Auth |
 |---------|-------|-------------|:----:|
 | GET | `/` | Liste paginée + filtres | ❌ |
+| GET | `/zone-dots` | Zones groupées avec compteurs local/duo | ❌ |
 | GET | `/mes` | Mes publications | ✅ |
 | GET | `/:id` | Détail (incrémente vues) | ❌ |
 | POST | `/` | Créer (multipart, max 10 médias) | ✅ |
@@ -466,8 +512,28 @@ nodemon (dev)
 
 **Paramètres GET `/` :**
 ```
-?page=1&limit=10&mode=local|duo&ville=Tunis&search=mot
+?page=1&limit=10&mode=local|duo&ville=Tunis&auteur=<id>
 ```
+
+**Réponse GET `/zone-dots` :**
+```json
+{
+  "zones": [
+    { "name": "Ariana Ville", "gouvernorat": "Ariana", "local": 3, "duo": 1 },
+    { "name": "Sfax", "gouvernorat": "Sfax", "local": 0, "duo": 2 }
+  ]
+}
+```
+
+---
+
+### Messages — `/api/messages`
+
+| Méthode | Route | Description | Auth |
+|---------|-------|-------------|:----:|
+| GET | `/conversations` | Liste des conversations | ✅ |
+| GET | `/:conversationId` | Messages d'une conversation | ✅ |
+| POST | `/` | Envoyer un message | ✅ |
 
 ---
 
@@ -496,10 +562,7 @@ GET /health  →  { status: 'OK', timestamp: '...' }
 ### Frontend — `src/environments/environment.js`
 
 ```javascript
-export const environment = {
-  production: false,
-  apiUrl: 'http://192.168.12.174:5000/api',
-};
+export const API_URL = 'http://192.168.x.x:5000/api';
 ```
 
 > Modifier l'IP selon le réseau local de la machine backend.
@@ -529,7 +592,7 @@ CLOUDINARY_CLOUD_NAME=
 CLOUDINARY_API_KEY=
 CLOUDINARY_API_SECRET=
 
-BASE_URL=http://192.168.12.174:5000
+BASE_URL=http://192.168.x.x:5000
 ```
 
 ---
@@ -588,14 +651,79 @@ npx expo start --clear
 
 ## Données géographiques
 
-`frontend/assets/tunisia.json` — Hiérarchie complète :
-```
-Gouvernorat → Délégation → Localité
+`frontend/assets/tunisia.json` — **4868 localités** avec coordonnées GPS :
+
+```json
+{
+  "Ariana": [
+    { "delegation": "Ariana Ville", "localite": "Residence Kortoba", "cp": "2058", "lat": 36.8665, "lng": 10.1647 },
+    ...
+  ],
+  "Tunis": [...],
+  ...
+}
 ```
 
-Les **24 gouvernorats** tunisiens sont inclus avec leurs coordonnées GPS
-pour l'affichage des marqueurs sur la carte.
+Structure : **Gouvernorat → [ { delegation, localite, cp, lat, lng } ]**
+
+- 24 gouvernorats
+- 261 délégations
+- 4868 localités
+- Chaque entrée possède des coordonnées `lat` / `lng`
+- Utilisé par MapScreen pour la résolution des coordonnées de zones **hors ligne** (sans appel Nominatim)
 
 ---
 
-*ByMap v1.0.0 — 2025*
+## Modifications récentes
+
+### Welcome.js — Splash simplifié
+- Suppression de tous les éléments décoratifs (blobs, chips, carte, boutons, textes)
+- Interface réduite à : **logo centré** + **barre de chargement** uniquement
+- Animation d'entrée du logo (fade + spring scale)
+- Barre de progression dégradé vert → bleu sur 3 secondes
+
+### MapScreen.js — Points de zones
+
+**Endpoint léger `/zone-dots` :**
+- Remplacement de `GET /publications?limit=500` (document complets) par `GET /publications/zone-dots`
+- Réponse : zones groupées avec compteurs `local` / `duo` uniquement (pas de contenu publication)
+- Gain de performance significatif (~10× moins de données transférées)
+
+**Coordonnées depuis `tunisia.json` (hors ligne) :**
+- Construction d'un index `TUNISIA_ZONE_COORDS` au chargement du module depuis `tunisia.json`
+- `getZoneCoords()` est désormais **synchrone** (suppression de l'appel Nominatim)
+- Ordre de résolution : exact → insensible à la casse → partiel → `GOVERNORATE_COORDS`
+- Plus aucun risque de rate-limit ou d'erreur réseau pour la géocodification
+
+**Actualisation manuelle (pull-to-refresh) :**
+- Suppression du `setInterval` toutes les 2 secondes
+- Remplacement par un geste **glisser vers le bas** depuis le haut de la carte
+- Indicateur visuel animé (flèche ↓ + spinner `ActivityIndicator`)
+
+**Taille des points :**
+- Points de zone réduits de 16 px à 10 px dans le HTML Leaflet
+
+**Redirection profil :**
+- Bouton profil (footer navbar) : si non connecté → `Login`, si connecté → `Profile`
+
+### LocalScreen.js — Animation point vert
+- Clic sur le point vert du header : animation **bounce** (spring scale 1 → 1,6 → 1)
+- Effet **ripple** : onde circulaire qui s'agrandit et disparaît en 500 ms
+
+### Backend — `GET /api/publications/zone-dots`
+- Nouvel endpoint optimisé : récupère uniquement les champs de localisation
+- Agrégation serveur : retourne `{ zones: [{ name, gouvernorat, local, duo }] }`
+- Priorité de nom : `delegation > ville > gouvernorat`
+- Les publications **DUO** sont comptées dans **les deux zones** (début ET fin)
+
+### Backend — `GET /api/publications` (filtre ville)
+- Filtre `ville` étendu pour inclure le champ `gouvernorat` dans la recherche `$or`
+- Couvre : `localisation.gouvernorat`, `localisationDebut.gouvernorat`, `localisationFin.gouvernorat`
+
+### tunisia.json — Coordonnées GPS
+- Ajout des champs `lat` et `lng` sur chacune des **4868 entrées**
+- Permet la résolution de coordonnées côté frontend sans appel réseau
+
+---
+
+*ByMap v2.0.0 — 2026*

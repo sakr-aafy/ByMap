@@ -5,8 +5,9 @@ const { protect }          = require('../middleware/auth.middleware');
 const { upload }           = require('../middleware/upload.middleware');
 
 // ─── Routes publiques ──────────────────────────────────────────────────────────
-router.get('/',     ctrl.getAll);   // GET  /api/publications          — liste
-router.get('/mes',  protect, ctrl.getMes);  // GET  /api/publications/mes  — mes pubs
+router.get('/',          ctrl.getAll);              // GET  /api/publications          — liste
+router.get('/zone-dots', ctrl.getZoneDots);        // GET  /api/publications/zone-dots — carte (léger)
+router.get('/mes',       protect, ctrl.getMes);    // GET  /api/publications/mes       — mes pubs
 router.get('/:id',  ctrl.getOne);   // GET  /api/publications/:id      — détail
 
 // ─── Routes protégées (JWT requis) ────────────────────────────────────────────

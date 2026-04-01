@@ -8,6 +8,8 @@ export const saveSession = async (accessToken, refreshToken, user) => {
     ['accessToken',  accessToken],
     ['refreshToken', refreshToken],
     ['currentUser',  JSON.stringify(user)],
+    ['userId',       String(user._id || '')],
+    ['userName',     `${user.prenom || ''} ${user.nom || ''}`.trim()],
   ]);
 };
 
@@ -19,7 +21,7 @@ export const getCurrentUser = async () => {
 };
 
 export const clearSession = async () => {
-  await AsyncStorage.multiRemove(['accessToken', 'refreshToken', 'currentUser']);
+  await AsyncStorage.multiRemove(['accessToken', 'refreshToken', 'currentUser', 'userId', 'userName']);
 };
 
 // ─── POST /api/auth/register ──────────────────────────────────────────────────
@@ -77,7 +79,28 @@ export async function login({ email, phone, password }) {
     throw err;
   }
 
+  // OTP de connexion requis (credentials corrects, email envoyé)
+  if (res.ok && data.loginOtpRequired) {
+    const err = new Error(data.message);
+    err.loginOtpRequired = true;
+    err.email = data.email;
+    throw err;
+  }
+
   if (!res.ok) throw new Error(data.message || 'Erreur connexion');
+  await saveSession(data.accessToken, data.refreshToken, data.user);
+  return data;
+}
+
+// ─── POST /api/auth/verify-login-otp ─────────────────────────────────────────
+export async function verifyLoginOtp({ email, code }) {
+  const res  = await fetch(`${API_URL}/auth/verify-login-otp`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ email, code }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || 'Code invalide');
   await saveSession(data.accessToken, data.refreshToken, data.user);
   return data;
 }

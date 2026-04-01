@@ -216,7 +216,7 @@ exports.login = async (req, res) => {
     const match = await user.comparePassword(password);
     if (!match) return res.status(401).json({ message: 'Mot de passe incorrect' });
 
-    // Bloquer si email non vérifié — renvoyer un code si l'ancien est expiré
+    // Bloquer si email non vérifié
     if (email && !user.isEmailVerified) {
       const codeExpired =
         !user.emailVerificationCode ||
@@ -242,11 +242,27 @@ exports.login = async (req, res) => {
       });
     }
 
+    // ── Si l'utilisateur a un email → envoyer OTP de connexion ──────────────
+    if (user.email) {
+      const otp     = emailService.generateCode();
+      const expires = new Date(Date.now() + 5 * 60 * 1000); // 5 min
+      user.loginOtpCode    = otp;
+      user.loginOtpExpires = expires;
+      await user.save({ validateBeforeSave: false });
+      await emailService.sendLoginOtpEmail(user.email, otp);
+
+      return res.json({
+        message:          'Code de vérification envoyé par email',
+        loginOtpRequired: true,
+        email:            user.email,
+      });
+    }
+
+    // ── Pas d'email (téléphone uniquement) → connexion directe ───────────────
     const accessToken  = signAccess(user._id, user.role);
     const refreshToken = signRefresh(user._id);
-
-    user.refreshToken = refreshToken;
-    user.lastLogin    = new Date();
+    user.refreshToken  = refreshToken;
+    user.lastLogin     = new Date();
     await user.save({ validateBeforeSave: false });
 
     res.json({
@@ -285,6 +301,105 @@ exports.refresh = async (req, res) => {
     res.json({ accessToken: newAccess, refreshToken: newRefresh });
   } catch (err) {
     res.status(403).json({ message: 'Token expiré ou invalide' });
+  }
+};
+
+// ─── POST /api/auth/verify-login-otp ─────────────────────────────────────────
+exports.verifyLoginOtp = async (req, res) => {
+  try {
+    const { email, code } = req.body;
+    if (!email || !code)
+      return res.status(400).json({ message: 'Email et code requis' });
+
+    const user = await User.findOne({ email }).select('+loginOtpCode +loginOtpExpires');
+    if (!user) return res.status(404).json({ message: 'Utilisateur introuvable' });
+
+    if (!user.loginOtpCode || !user.loginOtpExpires)
+      return res.status(400).json({ message: 'Aucun code en attente' });
+
+    if (user.loginOtpExpires < new Date())
+      return res.status(400).json({ message: 'Code expiré. Reconnectez-vous.' });
+
+    if (user.loginOtpCode !== code)
+      return res.status(400).json({ message: 'Code incorrect' });
+
+    // Effacer l'OTP et générer les tokens
+    user.loginOtpCode    = null;
+    user.loginOtpExpires = null;
+    const accessToken    = signAccess(user._id, user.role);
+    const refreshToken   = signRefresh(user._id);
+    user.refreshToken    = refreshToken;
+    user.lastLogin       = new Date();
+    await user.save({ validateBeforeSave: false });
+
+    res.json({
+      message: 'Connexion réussie',
+      accessToken,
+      refreshToken,
+      user: user.toPublic(),
+    });
+  } catch (err) {
+    console.error('[VERIFY-LOGIN-OTP]', err);
+    res.status(500).json({ message: 'Erreur serveur', error: err.message });
+  }
+};
+
+// ─── POST /api/auth/forgot-password ──────────────────────────────────────────
+exports.forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ message: 'Email requis' });
+
+    const user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ message: 'Aucun compte avec cet email' });
+
+    const code    = emailService.generateCode();
+    const expires = new Date(Date.now() + 10 * 60 * 1000);
+
+    user.passwordResetCode    = code;
+    user.passwordResetExpires = expires;
+    await user.save({ validateBeforeSave: false });
+
+    await emailService.sendPasswordResetEmail(email, code);
+
+    res.json({ message: 'Code de réinitialisation envoyé par email' });
+  } catch (err) {
+    console.error('[FORGOT-PASSWORD]', err);
+    res.status(500).json({ message: 'Erreur serveur', error: err.message });
+  }
+};
+
+// ─── POST /api/auth/reset-password ───────────────────────────────────────────
+exports.resetPassword = async (req, res) => {
+  try {
+    const { email, code, newPassword } = req.body;
+    if (!email || !code || !newPassword)
+      return res.status(400).json({ message: 'Email, code et nouveau mot de passe requis' });
+
+    if (newPassword.length < 6)
+      return res.status(400).json({ message: 'Le mot de passe doit contenir au moins 6 caractères' });
+
+    const user = await User.findOne({ email }).select('+passwordResetCode +passwordResetExpires');
+    if (!user) return res.status(404).json({ message: 'Utilisateur introuvable' });
+
+    if (!user.passwordResetCode || !user.passwordResetExpires)
+      return res.status(400).json({ message: 'Aucune demande de réinitialisation en cours' });
+
+    if (user.passwordResetExpires < new Date())
+      return res.status(400).json({ message: 'Code expiré. Faites une nouvelle demande.' });
+
+    if (user.passwordResetCode !== code)
+      return res.status(400).json({ message: 'Code incorrect' });
+
+    user.password             = newPassword;
+    user.passwordResetCode    = null;
+    user.passwordResetExpires = null;
+    await user.save();
+
+    res.json({ message: 'Mot de passe réinitialisé avec succès' });
+  } catch (err) {
+    console.error('[RESET-PASSWORD]', err);
+    res.status(500).json({ message: 'Erreur serveur', error: err.message });
   }
 };
 

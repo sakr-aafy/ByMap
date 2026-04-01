@@ -7,11 +7,13 @@ import {
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
+import { LinearGradient } from 'expo-linear-gradient';
 import {
   login as apiLogin,
   register as apiRegister,
   verifyEmail as apiVerifyEmail,
   resendVerification as apiResend,
+  verifyLoginOtp as apiVerifyLoginOtp,
 } from '../utils/api';
 
 // ─── Palette ────────────────────────────────────────────────────────────────
@@ -57,7 +59,7 @@ const InputField = ({
 
   const borderColor = borderAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [error ? C.red : C.border, error ? C.red : C.blue],
+    outputRange: [error ? C.red : 'rgba(255,255,255,0.14)', error ? C.red : '#1E90FF'],
   });
 
   return (
@@ -69,14 +71,14 @@ const InputField = ({
       ]}>
         {icon && (
           <View style={styles.inputIconLeft}>
-            <Icon name={icon} size={15} color={error ? C.red : (focused ? C.blue : C.grey)} />
+            <Icon name={icon} size={15} color={error ? C.red : (focused ? '#1E90FF' : 'rgba(255,255,255,0.6)')} />
           </View>
         )}
         {prefix && <Text style={styles.inputPrefix}>{prefix}</Text>}
         <TextInput
           style={styles.inputText}
           placeholder={placeholder}
-          placeholderTextColor="#B0B3C6"
+          placeholderTextColor="rgba(255,255,255,0.4)"
           value={value}
           onChangeText={onChangeText}
           keyboardType={keyboardType}
@@ -88,7 +90,7 @@ const InputField = ({
         />
         {secureTextEntry && (
           <TouchableOpacity onPress={() => setHidden(!hidden)} style={styles.inputIconRight}>
-            <Icon name={hidden ? 'eye' : 'eye-slash'} size={15} color={C.grey} />
+            <Icon name={hidden ? 'eye' : 'eye-slash'} size={15} color="rgba(255,255,255,0.6)" />
           </TouchableOpacity>
         )}
       </Animated.View>
@@ -123,7 +125,7 @@ export default function LoginScreen() {
   const [loading,  setLoading]  = useState(false);
 
   // ── Verification state ────────────────────────────────────────────────────
-  const [step,         setStep]         = useState('auth');   // 'auth' | 'verify'
+  const [step,         setStep]         = useState('auth');   // 'auth' | 'verify' | 'loginOtp'
   const [pendingEmail, setPendingEmail] = useState('');
   const [digits,       setDigits]       = useState(['','','','','','']);
   const [countdown,    setCountdown]    = useState(0);
@@ -229,11 +231,51 @@ export default function LoginScreen() {
         setVerifyError('');
         setCountdown(60);
         setStep('verify');
+      } else if (err.loginOtpRequired) {
+        setPendingEmail(err.email);
+        setDigits(['','','','','','']);
+        setVerifyError('');
+        setCountdown(60);
+        setStep('loginOtp');
       } else {
         setErrors({ global: err.message });
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ─── Vérification OTP connexion ───────────────────────────────────────────
+  const handleVerifyLoginOtp = async () => {
+    const code = digits.join('');
+    if (code.length < 6) { setVerifyError('Entrez le code à 6 chiffres'); return; }
+    setVerifyError('');
+    setLoading(true);
+    try {
+      const data = await apiVerifyLoginOtp({ email: pendingEmail, code });
+      if (data.user?.role === 'admin') {
+        navigation.replace('AdminDashboard');
+      } else {
+        navigation.replace('Map');
+      }
+    } catch (err) {
+      setVerifyError(err.message);
+      setDigits(['','','','','','']);
+      digitRefs[0].current?.focus();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendLoginOtp = async () => {
+    if (countdown > 0) return;
+    try {
+      await apiLogin({ email: pendingEmail, password });
+      setCountdown(60);
+      setDigits(['','','','','','']);
+      setVerifyError('');
+    } catch {
+      // silencieux
     }
   };
 
@@ -316,300 +358,425 @@ export default function LoginScreen() {
   // ─── ÉCRAN VÉRIFICATION ───────────────────────────────────────────────────
   if (step === 'verify') {
     return (
-      <SafeAreaView style={styles.safe}>
-        <StatusBar style="dark" />
-        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <LinearGradient colors={['#0a1628', '#0f2040', '#0d1a30']} style={{ flex: 1 }}>
+        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+          <View style={styles.blobTopRight} />
+          <View style={styles.blobBottomLeft} />
+        </View>
+        <SafeAreaView style={styles.safe}>
+          <StatusBar style="light" />
+          <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
 
-            {/* Back */}
-            <TouchableOpacity style={styles.backBtn} onPress={() => setStep('auth')} activeOpacity={0.7}>
-              <View style={styles.backCircle}>
-                <Icon name="arrow-left" size={20} color={C.greyDark} style={{ top: -5 }} />
-              </View>
-            </TouchableOpacity>
-
-            {/* Icon & titre */}
-            <View style={styles.verifyHeader}>
-              <View style={styles.verifyIconWrap}>
-                <Text style={{ fontSize: 40 }}>✉️</Text>
-              </View>
-              <Text style={styles.verifyTitle}>Vérifiez votre email</Text>
-              <Text style={styles.verifySubtitle}>
-                Un code à 6 chiffres a été envoyé à{'\n'}
-                <Text style={{ color: C.blue, fontWeight: '700' }}>{pendingEmail}</Text>
-              </Text>
-            </View>
-
-            {/* OTP boxes */}
-            <View style={styles.otpRow}>
-              {digits.map((d, i) => (
-                <TextInput
-                  key={i}
-                  ref={digitRefs[i]}
-                  style={[
-                    styles.otpBox,
-                    d ? styles.otpBoxFilled : null,
-                    verifyError ? styles.otpBoxError : null,
-                  ]}
-                  value={d}
-                  onChangeText={(v) => handleDigit(v, i)}
-                  onKeyPress={(e) => handleDigitKey(e, i)}
-                  keyboardType="number-pad"
-                  maxLength={1}
-                  selectTextOnFocus
-                  textAlign="center"
-                />
-              ))}
-            </View>
-
-            {verifyError ? (
-              <Text style={styles.verifyError}>{verifyError}</Text>
-            ) : null}
-
-            {/* Bouton vérifier */}
-            <TouchableOpacity
-              style={[styles.primaryBtn, loading && { opacity: 0.7 }]}
-              onPress={handleVerify}
-              disabled={loading}
-              activeOpacity={0.88}
-            >
-              {loading
-                ? <ActivityIndicator color={C.white} />
-                : <Text style={styles.primaryBtnText}>VÉRIFIER</Text>
-              }
-            </TouchableOpacity>
-
-            {/* Renvoi */}
-            <View style={styles.resendRow}>
-              <Text style={styles.resendLabel}>Vous n'avez pas reçu le code ? </Text>
-              <TouchableOpacity onPress={handleResend} disabled={countdown > 0}>
-                <Text style={[styles.resendLink, countdown > 0 && styles.resendDisabled]}>
-                  {countdown > 0 ? `Renvoyer (${countdown}s)` : 'Renvoyer'}
-                </Text>
+              {/* Back */}
+              <TouchableOpacity style={styles.backBtn} onPress={() => setStep('auth')} activeOpacity={0.7}>
+                <View style={styles.backCircle}>
+                  <Icon name="arrow-left" size={20} color="#FFFFFF" style={{ top: -5 }} />
+                </View>
               </TouchableOpacity>
-            </View>
 
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
+              {/* Icon & titre */}
+              <View style={styles.verifyHeader}>
+                <View style={styles.verifyIconWrap}>
+                  <Text style={{ fontSize: 40 }}>✉️</Text>
+                </View>
+                <Text style={styles.verifyTitle}>Vérifiez votre email</Text>
+                <Text style={styles.verifySubtitle}>
+                  Un code à 6 chiffres a été envoyé à{'\n'}
+                  <Text style={{ color: '#1E90FF', fontWeight: '700' }}>{pendingEmail}</Text>
+                </Text>
+              </View>
+
+              {/* OTP boxes */}
+              <View style={styles.otpRow}>
+                {digits.map((d, i) => (
+                  <TextInput
+                    key={i}
+                    ref={digitRefs[i]}
+                    style={[
+                      styles.otpBox,
+                      d ? styles.otpBoxFilled : null,
+                      verifyError ? styles.otpBoxError : null,
+                    ]}
+                    value={d}
+                    onChangeText={(v) => handleDigit(v, i)}
+                    onKeyPress={(e) => handleDigitKey(e, i)}
+                    keyboardType="number-pad"
+                    maxLength={1}
+                    selectTextOnFocus
+                    textAlign="center"
+                  />
+                ))}
+              </View>
+
+              {verifyError ? (
+                <Text style={styles.verifyError}>{verifyError}</Text>
+              ) : null}
+
+              {/* Bouton vérifier */}
+              <TouchableOpacity
+                style={[{ borderRadius: 14, marginTop: 8, overflow: 'hidden' }, loading && { opacity: 0.7 }]}
+                onPress={handleVerify}
+                disabled={loading}
+                activeOpacity={0.88}
+              >
+                <LinearGradient colors={['#1E90FF', '#0A6FCC']} style={styles.primaryBtn}>
+                  {loading
+                    ? <ActivityIndicator color={C.white} />
+                    : <Text style={styles.primaryBtnText}>VÉRIFIER</Text>
+                  }
+                </LinearGradient>
+              </TouchableOpacity>
+
+              {/* Renvoi */}
+              <View style={styles.resendRow}>
+                <Text style={styles.resendLabel}>Vous n'avez pas reçu le code ? </Text>
+                <TouchableOpacity onPress={handleResend} disabled={countdown > 0}>
+                  <Text style={[styles.resendLink, countdown > 0 && styles.resendDisabled]}>
+                    {countdown > 0 ? `Renvoyer (${countdown}s)` : 'Renvoyer'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </LinearGradient>
+    );
+  }
+
+  // ─── ÉCRAN OTP CONNEXION ─────────────────────────────────────────────────
+  if (step === 'loginOtp') {
+    return (
+      <LinearGradient colors={['#0a1628', '#0f2040', '#0d1a30']} style={{ flex: 1 }}>
+        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+          <View style={styles.blobTopRight} />
+          <View style={styles.blobBottomLeft} />
+        </View>
+        <SafeAreaView style={styles.safe}>
+          <StatusBar style="light" />
+          <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+
+              <TouchableOpacity style={styles.backBtn} onPress={() => setStep('auth')} activeOpacity={0.7}>
+                <View style={styles.backCircle}>
+                  <Icon name="arrow-left" size={20} color="#FFFFFF" style={{ top: -5 }} />
+                </View>
+              </TouchableOpacity>
+
+              <View style={styles.verifyHeader}>
+                <View style={styles.verifyIconWrap}>
+                  <Text style={{ fontSize: 40 }}>🔐</Text>
+                </View>
+                <Text style={styles.verifyTitle}>Vérification de connexion</Text>
+                <Text style={styles.verifySubtitle}>
+                  Un code à 6 chiffres a été envoyé à{'\n'}
+                  <Text style={{ color: '#1E90FF', fontWeight: '700' }}>{pendingEmail}</Text>
+                </Text>
+              </View>
+
+              <View style={styles.otpRow}>
+                {digits.map((d, i) => (
+                  <TextInput
+                    key={i}
+                    ref={digitRefs[i]}
+                    style={[
+                      styles.otpBox,
+                      d ? styles.otpBoxFilled : null,
+                      verifyError ? styles.otpBoxError : null,
+                    ]}
+                    value={d}
+                    onChangeText={(v) => handleDigit(v, i)}
+                    onKeyPress={(e) => handleDigitKey(e, i)}
+                    keyboardType="number-pad"
+                    maxLength={1}
+                    selectTextOnFocus
+                    textAlign="center"
+                  />
+                ))}
+              </View>
+
+              {verifyError ? <Text style={styles.verifyError}>{verifyError}</Text> : null}
+
+              <TouchableOpacity
+                style={[{ borderRadius: 14, marginTop: 8, overflow: 'hidden' }, loading && { opacity: 0.7 }]}
+                onPress={handleVerifyLoginOtp}
+                disabled={loading}
+                activeOpacity={0.88}
+              >
+                <LinearGradient colors={['#1E90FF', '#0A6FCC']} style={styles.primaryBtn}>
+                  {loading
+                    ? <ActivityIndicator color={C.white} />
+                    : <Text style={styles.primaryBtnText}>CONFIRMER LA CONNEXION</Text>
+                  }
+                </LinearGradient>
+              </TouchableOpacity>
+
+              <View style={styles.resendRow}>
+                <Text style={styles.resendLabel}>Code non reçu ? </Text>
+                <TouchableOpacity onPress={handleResendLoginOtp} disabled={countdown > 0}>
+                  <Text style={[styles.resendLink, countdown > 0 && styles.resendDisabled]}>
+                    {countdown > 0 ? `Renvoyer (${countdown}s)` : 'Renvoyer'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </LinearGradient>
     );
   }
 
   // ─── ÉCRAN AUTH ───────────────────────────────────────────────────────────
   return (
-    <SafeAreaView style={styles.safe}>
-      <StatusBar style="dark" />
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+    <LinearGradient colors={['#0a1628', '#0f2040', '#0d1a30']} style={{ flex: 1 }}>
+      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+        <View style={styles.blobTopRight} />
+        <View style={styles.blobBottomLeft} />
+      </View>
+      <SafeAreaView style={styles.safe}>
+        <StatusBar style="light" />
+        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
-          {/* Header */}
-          <Animated.View style={[styles.header, {
-            opacity: fadeAnim,
-            transform: [{ translateY: slideAnim.interpolate({ inputRange: [0,1], outputRange: [-20,0] }) }],
-          }]}>
-            <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.7}>
-              <View style={styles.backCircle}>
-                <Icon name="arrow-left" size={20} color={C.greyDark} style={{ top: -5 }} />
-              </View>
-            </TouchableOpacity>
-          </Animated.View>
-
-          {/* Tabs */}
-          <Animated.View style={[styles.tabBar, { opacity: fadeAnim }]}>
-            <Animated.View style={[styles.tabIndicator, { left: indicatorLeft }]} />
-            <TouchableOpacity style={styles.tabBtn} onPress={() => switchTab('login')} activeOpacity={0.8}>
-              <Text style={[styles.tabText, tab === 'login' && styles.tabTextActive]}>Connexion</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.tabBtn} onPress={() => switchTab('signup')} activeOpacity={0.8}>
-              <Text style={[styles.tabText, tab === 'signup' && styles.tabTextActive]}>Inscription</Text>
-            </TouchableOpacity>
-          </Animated.View>
-
-          {/* Erreur globale */}
-          {errors.global ? (
-            <View style={styles.globalErrBox}>
-              <Text style={styles.globalErrText}>{errors.global}</Text>
-            </View>
-          ) : null}
-
-          {/* ── Formulaire LOGIN ── */}
-          {tab === 'login' && (
-            <Animated.View style={[styles.form, { opacity: fadeAnim }]}>
-
-              {errors.emailOrPhone ? (
-                <View style={styles.globalErrBox}>
-                  <Text style={styles.globalErrText}>{errors.emailOrPhone}</Text>
+            {/* Header */}
+            <Animated.View style={[styles.header, {
+              opacity: fadeAnim,
+              transform: [{ translateY: slideAnim.interpolate({ inputRange: [0,1], outputRange: [-20,0] }) }],
+            }]}>
+              <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.7}>
+                <View style={styles.backCircle}>
+                  <Icon name="arrow-left" size={20} color="#FFFFFF" style={{ top: -5 }} />
                 </View>
-              ) : null}
+              </TouchableOpacity>
+            </Animated.View>
 
-              <InputField
-                icon="envelope"
-                placeholder="Adresse email"
-                value={email}
-                onChangeText={(v) => { setEmail(v); setErrors(p => ({ ...p, email: '', emailOrPhone: '' })); }}
-                keyboardType="email-address"
-                error={errors.email}
-              />
+            {/* Tabs */}
+            <Animated.View style={[styles.tabBar, { opacity: fadeAnim }]}>
+              <Animated.View style={[styles.tabIndicatorWrapper, { left: indicatorLeft }]}>
+                <LinearGradient colors={['#1E90FF', '#0A6FCC']} style={styles.tabIndicator} />
+              </Animated.View>
+              <TouchableOpacity style={styles.tabBtn} onPress={() => switchTab('login')} activeOpacity={0.8}>
+                <Text style={[styles.tabText, tab === 'login' && styles.tabTextActive]}>Connexion</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.tabBtn} onPress={() => switchTab('signup')} activeOpacity={0.8}>
+                <Text style={[styles.tabText, tab === 'signup' && styles.tabTextActive]}>Inscription</Text>
+              </TouchableOpacity>
+            </Animated.View>
 
-              <View style={styles.dividerRow}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>ou</Text>
-                <View style={styles.dividerLine} />
+            {/* Erreur globale */}
+            {errors.global ? (
+              <View style={styles.globalErrBox}>
+                <Text style={styles.globalErrText}>{errors.global}</Text>
               </View>
+            ) : null}
 
-              <InputField
-                icon="phone"
-                placeholder="Numéro de téléphone"
-                value={phone}
-                onChangeText={(v) => { setPhone(v); setErrors(p => ({ ...p, phone: '', emailOrPhone: '' })); }}
-                keyboardType="phone-pad"
-                prefix="+216  "
-                error={errors.phone}
-                maxLength={8}
-              />
+            {/* ── Formulaire LOGIN ── */}
+            {tab === 'login' && (
+              <Animated.View style={[styles.form, { opacity: fadeAnim }]}>
 
-              <InputField
-                icon="lock"
-                placeholder="Mot de passe"
-                value={password}
-                onChangeText={(v) => { setPassword(v); setErrors(p => ({ ...p, password: '' })); }}
-                secureTextEntry
-                error={errors.password}
-              />
+                {errors.emailOrPhone ? (
+                  <View style={styles.globalErrBox}>
+                    <Text style={styles.globalErrText}>{errors.emailOrPhone}</Text>
+                  </View>
+                ) : null}
 
-              <TouchableOpacity style={styles.forgotBtn} activeOpacity={0.7}>
-                <Text style={styles.forgotText}>Mot de passe oublié ?</Text>
-              </TouchableOpacity>
+                <InputField
+                  icon="envelope"
+                  placeholder="Adresse email"
+                  value={email}
+                  onChangeText={(v) => { setEmail(v); setErrors(p => ({ ...p, email: '', emailOrPhone: '' })); }}
+                  keyboardType="email-address"
+                  error={errors.email}
+                />
 
-              <TouchableOpacity
-                style={[styles.primaryBtn, loading && { opacity: 0.7 }]}
-                onPress={handleLogin}
-                disabled={loading}
-                activeOpacity={0.88}
-              >
-                {loading
-                  ? <ActivityIndicator color={C.white} />
-                  : <Text style={styles.primaryBtnText}>SE CONNECTER</Text>
-                }
-              </TouchableOpacity>
-            </Animated.View>
-          )}
+                <View style={styles.dividerRow}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>ou</Text>
+                  <View style={styles.dividerLine} />
+                </View>
 
-          {/* ── Formulaire SIGNUP ── */}
-          {tab === 'signup' && (
-            <Animated.View style={[styles.form, { opacity: fadeAnim }]}>
-              <InputField
-                icon="user"
-                placeholder="Nom"
-                value={name}
-                onChangeText={(v) => { setName(v); setErrors(p => ({ ...p, name: '' })); }}
-                error={errors.name}
-              />
-              <InputField
-                icon="user"
-                placeholder="Prénom"
-                value={prenom}
-                onChangeText={(v) => { setPrenom(v); setErrors(p => ({ ...p, prenom: '' })); }}
-                error={errors.prenom}
-              />
-              <InputField
-                icon="envelope"
-                placeholder="Adresse email"
-                value={email}
-                onChangeText={(v) => { setEmail(v); setErrors(p => ({ ...p, email: '' })); }}
-                keyboardType="email-address"
-                error={errors.email}
-              />
-              <InputField
-                icon="phone"
-                placeholder="Numéro de téléphone"
-                value={phone}
-                onChangeText={(v) => { setPhone(v); setErrors(p => ({ ...p, phone: '' })); }}
-                keyboardType="phone-pad"
-                prefix="+216  "
-                error={errors.phone}
-                maxLength={8}
-              />
-              <InputField
-                icon="lock"
-                placeholder="Mot de passe (min. 6 caractères)"
-                value={password}
-                onChangeText={(v) => { setPassword(v); setErrors(p => ({ ...p, password: '' })); }}
-                secureTextEntry
-                error={errors.password}
-              />
-              <InputField
-                icon="lock"
-                placeholder="Confirmer le mot de passe"
-                value={confirm}
-                onChangeText={(v) => { setConfirm(v); setErrors(p => ({ ...p, confirm: '' })); }}
-                secureTextEntry
-                error={errors.confirm}
-              />
-              <TouchableOpacity
-                style={[styles.primaryBtn, loading && { opacity: 0.7 }]}
-                onPress={handleSignUp}
-                disabled={loading}
-                activeOpacity={0.88}
-              >
-                {loading
-                  ? <ActivityIndicator color={C.white} />
-                  : <Text style={styles.primaryBtnText}>CRÉER MON COMPTE</Text>
-                }
-              </TouchableOpacity>
-            </Animated.View>
-          )}
+                <InputField
+                  icon="phone"
+                  placeholder="Numéro de téléphone"
+                  value={phone}
+                  onChangeText={(v) => { setPhone(v); setErrors(p => ({ ...p, phone: '', emailOrPhone: '' })); }}
+                  keyboardType="phone-pad"
+                  prefix="+216  "
+                  error={errors.phone}
+                  maxLength={8}
+                />
 
-          {/* Séparateur social */}
-          <View style={styles.socialDivider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>Continuer avec</Text>
-            <View style={styles.dividerLine} />
-          </View>
+                <InputField
+                  icon="lock"
+                  placeholder="Mot de passe"
+                  value={password}
+                  onChangeText={(v) => { setPassword(v); setErrors(p => ({ ...p, password: '' })); }}
+                  secureTextEntry
+                  error={errors.password}
+                />
 
-          {/* Boutons sociaux */}
-          <View style={styles.socialGrid}>
-            <SocialBtn label="Google"   iconName="G" iconColor={C.google}   bgColor={C.white}    textColor={C.greyDark} onPress={handleGoogle} />
-            <SocialBtn label="Facebook" iconName="f" iconColor={C.white}    bgColor={C.facebook} textColor={C.white}    onPress={handleFacebook} />
-            <SocialBtn label="Apple"    iconName="A" iconColor={C.white}    bgColor={C.apple}    textColor={C.white}    onPress={handleApple} />
-          </View>
+                <TouchableOpacity style={styles.forgotBtn} activeOpacity={0.7} onPress={() => navigation.navigate('ForgetPassword')}>
+                  <Text style={styles.forgotText}>Mot de passe oublié ?</Text>
+                </TouchableOpacity>
 
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+                <TouchableOpacity
+                  style={[{ borderRadius: 14, marginTop: 8, overflow: 'hidden' }, loading && { opacity: 0.7 }]}
+                  onPress={handleLogin}
+                  disabled={loading}
+                  activeOpacity={0.88}
+                >
+                  <LinearGradient colors={['#1E90FF', '#0A6FCC']} style={styles.primaryBtn}>
+                    {loading
+                      ? <ActivityIndicator color={C.white} />
+                      : <Text style={styles.primaryBtnText}>SE CONNECTER</Text>
+                    }
+                  </LinearGradient>
+                </TouchableOpacity>
+              </Animated.View>
+            )}
+
+            {/* ── Formulaire SIGNUP ── */}
+            {tab === 'signup' && (
+              <Animated.View style={[styles.form, { opacity: fadeAnim }]}>
+                <InputField
+                  icon="user"
+                  placeholder="Nom"
+                  value={name}
+                  onChangeText={(v) => { setName(v); setErrors(p => ({ ...p, name: '' })); }}
+                  error={errors.name}
+                />
+                <InputField
+                  icon="user"
+                  placeholder="Prénom"
+                  value={prenom}
+                  onChangeText={(v) => { setPrenom(v); setErrors(p => ({ ...p, prenom: '' })); }}
+                  error={errors.prenom}
+                />
+                <InputField
+                  icon="envelope"
+                  placeholder="Adresse email"
+                  value={email}
+                  onChangeText={(v) => { setEmail(v); setErrors(p => ({ ...p, email: '' })); }}
+                  keyboardType="email-address"
+                  error={errors.email}
+                />
+                <InputField
+                  icon="phone"
+                  placeholder="Numéro de téléphone"
+                  value={phone}
+                  onChangeText={(v) => { setPhone(v); setErrors(p => ({ ...p, phone: '' })); }}
+                  keyboardType="phone-pad"
+                  prefix="+216  "
+                  error={errors.phone}
+                  maxLength={8}
+                />
+                <InputField
+                  icon="lock"
+                  placeholder="Mot de passe (min. 6 caractères)"
+                  value={password}
+                  onChangeText={(v) => { setPassword(v); setErrors(p => ({ ...p, password: '' })); }}
+                  secureTextEntry
+                  error={errors.password}
+                />
+                <InputField
+                  icon="lock"
+                  placeholder="Confirmer le mot de passe"
+                  value={confirm}
+                  onChangeText={(v) => { setConfirm(v); setErrors(p => ({ ...p, confirm: '' })); }}
+                  secureTextEntry
+                  error={errors.confirm}
+                />
+                <TouchableOpacity
+                  style={[{ borderRadius: 14, marginTop: 8, overflow: 'hidden' }, loading && { opacity: 0.7 }]}
+                  onPress={handleSignUp}
+                  disabled={loading}
+                  activeOpacity={0.88}
+                >
+                  <LinearGradient colors={['#1E90FF', '#0A6FCC']} style={styles.primaryBtn}>
+                    {loading
+                      ? <ActivityIndicator color={C.white} />
+                      : <Text style={styles.primaryBtnText}>CRÉER MON COMPTE</Text>
+                    }
+                  </LinearGradient>
+                </TouchableOpacity>
+              </Animated.View>
+            )}
+
+            {/* Séparateur social */}
+            <View style={styles.socialDivider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>Continuer avec</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            {/* Boutons sociaux */}
+            <View style={styles.socialGrid}>
+              <SocialBtn label="Google"   iconName="G" iconColor={C.google}   bgColor="rgba(255,255,255,0.08)"  textColor={C.white}    onPress={handleGoogle} />
+              <SocialBtn label="Facebook" iconName="f" iconColor={C.facebook} bgColor="rgba(255,255,255,0.08)"  textColor={C.white}    onPress={handleFacebook} />
+              <SocialBtn label="Apple"    iconName="A" iconColor={C.white}    bgColor="rgba(255,255,255,0.08)"  textColor={C.white}    onPress={handleApple} />
+            </View>
+
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </LinearGradient>
   );
 }
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  safe:   { flex: 1, backgroundColor: C.white },
+  safe:   { flex: 1, backgroundColor: 'transparent' },
   flex:   { flex: 1 },
   scroll: { flexGrow: 1, paddingHorizontal: 24, paddingBottom: 48 },
+
+  // Background blobs
+  blobTopRight: {
+    position: 'absolute',
+    top: -80,
+    right: -80,
+    width: 280,
+    height: 280,
+    borderRadius: 999,
+    backgroundColor: 'rgba(30,144,255,0.25)',
+  },
+  blobBottomLeft: {
+    position: 'absolute',
+    bottom: -60,
+    left: -70,
+    width: 240,
+    height: 240,
+    borderRadius: 999,
+    backgroundColor: 'rgba(52,199,89,0.22)',
+  },
 
   // Header
   header: { flexDirection: 'row', alignItems: 'center', marginTop: 16, marginBottom: 8 },
   backBtn:   { marginRight: 12 },
   backCircle: {
     top: 20, width: 40, height: 40, borderRadius: 20,
-    backgroundColor: C.greyLight, justifyContent: 'center', alignItems: 'center',
-    borderWidth: 1, borderColor: C.border,
+    backgroundColor: 'rgba(255,255,255,0.10)', justifyContent: 'center', alignItems: 'center',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)',
   },
 
   // Tabs
   tabBar: {
-    top: 20, flexDirection: 'row', backgroundColor: C.greyLight,
+    top: 20, flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.10)',
     borderRadius: 14, padding: 4, marginBottom: 28,
     position: 'relative', overflow: 'hidden',
   },
+  tabIndicatorWrapper: {
+    position: 'absolute', top: 4, bottom: 4, width: '48%', borderRadius: 11, overflow: 'hidden',
+  },
   tabIndicator: {
-    position: 'absolute', top: 4, bottom: 4, width: '48%',
-    backgroundColor: C.blue, borderRadius: 11,
-    shadowColor: C.blue, shadowOffset: { width: 0, height: 4 },
+    flex: 1, borderRadius: 11,
+    shadowColor: '#1E90FF', shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35, shadowRadius: 8, elevation: 4,
   },
   tabBtn:        { flex: 1, paddingVertical: 12, alignItems: 'center', zIndex: 2 },
-  tabText:       { fontSize: 14, fontWeight: '700', color: C.grey },
-  tabTextActive: { color: C.white },
+  tabText:       { fontSize: 14, fontWeight: '700', color: 'rgba(255,255,255,0.7)' },
+  tabTextActive: { color: '#FFFFFF' },
 
   // Form
   form: { gap: 12, marginBottom: 8 },
@@ -617,50 +784,52 @@ const styles = StyleSheet.create({
   // Input group
   inputGroup: { gap: 4 },
   inputWrap: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: C.greyLight,
-    borderRadius: 12, borderWidth: 1.5, paddingHorizontal: 14, paddingVertical: 2, minHeight: 52,
+    flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 14, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.14)',
+    paddingHorizontal: 14, paddingVertical: 2, minHeight: 52,
   },
-  inputWrapError: { backgroundColor: '#FFF5F5' },
+  inputWrapError: { backgroundColor: 'rgba(255,107,107,0.10)' },
   inputIconLeft:  { marginRight: 10 },
   inputIconRight: { marginLeft: 8, padding: 4 },
-  inputPrefix:    { fontSize: 14, color: C.blue, fontWeight: '700', marginRight: 4 },
-  inputText:      { flex: 1, fontSize: 15, color: C.greyDark, paddingVertical: 12 },
-  errText:        { fontSize: 12, color: C.red, marginLeft: 4, marginTop: 2 },
+  inputPrefix:    { fontSize: 14, color: '#1E90FF', fontWeight: '700', marginRight: 4 },
+  inputText:      { flex: 1, fontSize: 15, color: '#FFFFFF', paddingVertical: 12 },
+  errText:        { fontSize: 12, color: '#FF6B6B', marginLeft: 4, marginTop: 2 },
 
   // Global error
   globalErrBox: {
-    backgroundColor: '#FFF0F0', borderRadius: 10, padding: 12,
-    borderWidth: 1, borderColor: '#FFCDD2',
+    backgroundColor: 'rgba(255,107,107,0.12)', borderRadius: 10, padding: 12,
+    borderWidth: 1, borderColor: 'rgba(255,107,107,0.30)',
   },
-  globalErrText: { fontSize: 13, color: C.red, fontWeight: '500' },
+  globalErrText: { fontSize: 13, color: '#FF6B6B', fontWeight: '500' },
 
   // Dividers
   dividerRow:    { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 4 },
   socialDivider: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 24, marginBottom: 16 },
-  dividerLine:   { flex: 1, height: 1, backgroundColor: C.border },
-  dividerText:   { fontSize: 13, color: '#B0B3C6', fontWeight: '500' },
+  dividerLine:   { flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.14)' },
+  dividerText:   { fontSize: 13, color: 'rgba(255,255,255,0.6)', fontWeight: '500' },
 
   // Forgot
   forgotBtn:  { alignSelf: 'flex-end', marginTop: -4 },
-  forgotText: { fontSize: 13, color: C.blue, fontWeight: '600' },
+  forgotText: { fontSize: 13, color: 'rgba(255,255,255,0.6)', fontWeight: '600' },
 
   // Primary button
   primaryBtn: {
-    backgroundColor: C.blue, borderRadius: 14, paddingVertical: 16,
-    alignItems: 'center', marginTop: 8,
-    shadowColor: C.blue, shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35, shadowRadius: 12, elevation: 6,
+    borderRadius: 14, paddingVertical: 16,
+    alignItems: 'center',
+    shadowColor: '#1E90FF', shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.45, shadowRadius: 12, elevation: 6,
   },
-  primaryBtnText: { color: C.white, fontSize: 15, fontWeight: '800', letterSpacing: 1.2 },
+  primaryBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', letterSpacing: 1.2 },
 
   // Social
   socialGrid: { flexDirection: 'row', gap: 10 },
   socialBtn: {
     flex: 1, flexDirection: 'column', alignItems: 'center',
     justifyContent: 'center', paddingVertical: 14, borderRadius: 14, gap: 4,
-    borderWidth: 1, borderColor: C.border,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)',
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08, shadowRadius: 4, elevation: 2,
+    shadowOpacity: 0.18, shadowRadius: 4, elevation: 2,
   },
   socialIcon:  { fontSize: 20, fontWeight: '900' },
   socialLabel: { fontSize: 11, fontWeight: '600' },
@@ -669,40 +838,40 @@ const styles = StyleSheet.create({
   verifyHeader: { alignItems: 'center', marginTop: 60, marginBottom: 40 },
   verifyIconWrap: {
     width: 80, height: 80, borderRadius: 40,
-    backgroundColor: C.blueLight, justifyContent: 'center', alignItems: 'center',
+    backgroundColor: 'rgba(30,144,255,0.18)', justifyContent: 'center', alignItems: 'center',
     marginBottom: 20,
-    shadowColor: C.blue, shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15, shadowRadius: 12, elevation: 4,
+    shadowColor: '#1E90FF', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25, shadowRadius: 12, elevation: 4,
   },
   verifyTitle: {
-    fontSize: 22, fontWeight: '800', color: C.greyDark,
+    fontSize: 22, fontWeight: '800', color: '#FFFFFF',
     marginBottom: 10, letterSpacing: -0.3,
   },
   verifySubtitle: {
-    fontSize: 14, color: C.grey, textAlign: 'center', lineHeight: 22,
+    fontSize: 14, color: 'rgba(255,255,255,0.6)', textAlign: 'center', lineHeight: 22,
   },
 
   // OTP
   otpRow: { flexDirection: 'row', justifyContent: 'center', gap: 10, marginBottom: 8 },
   otpBox: {
     width: 46, height: 58, borderRadius: 12,
-    borderWidth: 2, borderColor: C.border,
-    backgroundColor: C.greyLight, fontSize: 24, fontWeight: '700',
-    color: C.greyDark, textAlign: 'center',
+    borderWidth: 2, borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.08)', fontSize: 22, fontWeight: '800',
+    color: '#FFFFFF', textAlign: 'center',
   },
   otpBoxFilled: {
-    borderColor: C.blue, backgroundColor: C.blueLight,
+    borderColor: '#1E90FF', backgroundColor: 'rgba(30,144,255,0.25)',
   },
-  otpBoxError: { borderColor: C.red, backgroundColor: '#FFF5F5' },
+  otpBoxError: { borderColor: '#FF6B6B', backgroundColor: 'rgba(255,107,107,0.10)' },
 
   verifyError: {
-    fontSize: 13, color: C.red, textAlign: 'center',
+    fontSize: 13, color: '#FF6B6B', textAlign: 'center',
     marginBottom: 12, fontWeight: '500',
   },
 
   // Resend
   resendRow:     { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 20 },
-  resendLabel:   { fontSize: 13, color: C.grey },
-  resendLink:    { fontSize: 13, color: C.blue, fontWeight: '700' },
-  resendDisabled:{ color: '#B0B3C6' },
+  resendLabel:   { fontSize: 13, color: 'rgba(255,255,255,0.6)' },
+  resendLink:    { fontSize: 13, color: '#1E90FF', fontWeight: '700' },
+  resendDisabled:{ color: 'rgba(255,255,255,0.3)' },
 });

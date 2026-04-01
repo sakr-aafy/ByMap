@@ -56,6 +56,40 @@ exports.create = async (req, res) => {
   }
 };
 
+// ─── GET /api/publications/zone-dots ─────────────────────────────────────────
+// Retourne les zones groupées avec comptages { zones: [{name, gouvernorat, local, duo}] }
+exports.getZoneDots = async (_req, res) => {
+  try {
+    const pubs = await Publication.find({ statut: 'active' })
+      .select('mode localisation localisationDebut localisationFin')
+      .lean();
+
+    const counts = {};
+    const addZone = (name, gouvernorat, mode) => {
+      if (!name) return;
+      if (!counts[name]) counts[name] = { name, gouvernorat: gouvernorat || '', local: 0, duo: 0 };
+      if (mode === 'local') counts[name].local++;
+      else counts[name].duo++;
+    };
+
+    pubs.forEach(p => {
+      if (p.mode === 'local') {
+        const name = p.localisation?.delegation || p.localisation?.ville || p.localisation?.gouvernorat;
+        addZone(name, p.localisation?.gouvernorat, 'local');
+      } else {
+        const nD = p.localisationDebut?.delegation || p.localisationDebut?.ville || p.localisationDebut?.gouvernorat;
+        const nF = p.localisationFin?.delegation   || p.localisationFin?.ville   || p.localisationFin?.gouvernorat;
+        addZone(nD, p.localisationDebut?.gouvernorat, 'duo');
+        addZone(nF, p.localisationFin?.gouvernorat,   'duo');
+      }
+    });
+
+    res.json({ zones: Object.values(counts) });
+  } catch (err) {
+    res.status(500).json({ message: 'Erreur serveur', error: err.message });
+  }
+};
+
 // ─── GET /api/publications ────────────────────────────────────────────────────
 // Liste paginée avec filtres (ville, mode, auteur)
 exports.getAll = async (req, res) => {
@@ -73,9 +107,12 @@ exports.getAll = async (req, res) => {
     if (auteur) filter.auteur = auteur;
     if (ville) {
       filter.$or = [
-        { 'localisation.ville':       { $regex: ville, $options: 'i' } },
-        { 'localisationDebut.ville':  { $regex: ville, $options: 'i' } },
-        { 'localisationFin.ville':    { $regex: ville, $options: 'i' } },
+        { 'localisation.ville':              { $regex: ville, $options: 'i' } },
+        { 'localisation.gouvernorat':        { $regex: ville, $options: 'i' } },
+        { 'localisationDebut.ville':         { $regex: ville, $options: 'i' } },
+        { 'localisationDebut.gouvernorat':   { $regex: ville, $options: 'i' } },
+        { 'localisationFin.ville':           { $regex: ville, $options: 'i' } },
+        { 'localisationFin.gouvernorat':     { $regex: ville, $options: 'i' } },
       ];
     }
 

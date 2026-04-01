@@ -9,6 +9,9 @@ router.post('/verify-email',        ctrl.verifyEmail);
 router.post('/resend-verification', ctrl.resendVerification);
 router.post('/login',               ctrl.login);
 router.post('/refresh',             ctrl.refresh);
+router.post('/verify-login-otp',    ctrl.verifyLoginOtp);
+router.post('/forgot-password',     ctrl.forgotPassword);
+router.post('/reset-password',      ctrl.resetPassword);
 
 // Protégée
 router.post('/logout', protect, ctrl.logout);
