@@ -2,6 +2,7 @@
   "expo": {
     "name": "ByMap",
     "slug": "ByMap",
+    "scheme": "bymap",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/logo.png",
@@ -52,7 +53,10 @@
           "locationWhenInUsePermission": "ByMap utilise votre position pour afficher votre emplacement sur la carte.",
           "locationAlwaysAndWhenInUsePermission": "ByMap utilise votre position pour le suivi en temps réel."
         }
-      ]
+      ],
+      "expo-video",
+      "expo-web-browser",
+      "expo-audio"
     ]
   }
 }

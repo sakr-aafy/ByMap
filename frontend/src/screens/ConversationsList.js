@@ -1,20 +1,16 @@
 // src/screens/ConversationsList.js
 import React, { useState, useCallback } from 'react';
+import { FontAwesome6 } from '@expo/vector-icons';
 import {
   StyleSheet, View, Text, FlatList, TouchableOpacity,
-  SafeAreaView, ActivityIndicator,
+  ActivityIndicator,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '../environments/environment';
-import { D, shadow, DarkBackground } from '../theme/index';
-
-const C = {
-  bg:     D.navy,    white:  D.white,  border: D.glassBorder,
-  text:   D.white,   grey:   D.textDim, blue: D.blue,
-  green:  D.green,   unread: D.blue,
-};
+import { useTranslation } from 'react-i18next';
 
 function timeAgo(dateStr) {
   if (!dateStr) return '';
@@ -27,6 +23,7 @@ function timeAgo(dateStr) {
 
 export default function ConversationsList() {
   const navigation = useNavigation();
+  const { t }      = useTranslation();
   const [convs,   setConvs]   = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -62,18 +59,23 @@ export default function ConversationsList() {
         onPress={() => navigation.navigate('Messages', { recipient: contact })}
         activeOpacity={0.75}
       >
-        <View style={styles.avatar}>
-          <Text style={styles.avatarLetter}>{initial}</Text>
+        {/* Avatar */}
+        <View style={styles.avatarWrap}>
+          <View style={[styles.avatar, unread > 0 && styles.avatarUnread]}>
+            <Text style={styles.avatarLetter}>{initial}</Text>
+          </View>
           <View style={styles.onlineDot} />
         </View>
+
+        {/* Body */}
         <View style={styles.rowBody}>
           <View style={styles.rowTop}>
             <Text style={[styles.name, unread > 0 && styles.nameBold]} numberOfLines={1}>{name}</Text>
-            <Text style={styles.time}>{time}</Text>
+            <Text style={[styles.time, unread > 0 && { color: '#2DBD7E', fontWeight: '700' }]}>{time}</Text>
           </View>
           <View style={styles.rowBottom}>
             <Text style={[styles.preview, unread > 0 && styles.previewBold]} numberOfLines={1}>
-              {preview || 'Démarrez la conversation'}
+              {preview || t('conversations.startConversation')}
             </Text>
             {unread > 0 && (
               <View style={styles.badge}>
@@ -82,49 +84,59 @@ export default function ConversationsList() {
             )}
           </View>
         </View>
+
+        {/* Chevron */}
+        <FontAwesome6 name="chevron-right" size={12} color="#D1D5DB" />
       </TouchableOpacity>
     );
   };
 
   return (
-    <DarkBackground style={{ flex: 1 }}>
-      <StatusBar style="light" />
+    <View style={{ flex: 1, backgroundColor: '#F2F5F3' }}>
+      <StatusBar style="dark" />
       <SafeAreaView style={styles.safe}>
 
         {/* ── Header ── */}
         <View style={styles.header}>
           <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.7}>
-            <Text style={styles.backIcon}>←</Text>
+            <FontAwesome6 name="arrow-left" size={16} color="#1A1A2E" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Messages</Text>
-          <View style={{ width: 36 }} />
+          <View style={styles.headerCenter}>
+            <Text style={styles.headerTitle}>{t('conversations.title')}</Text>
+            {convs.length > 0 && (
+              <View style={styles.headerBadge}>
+                <Text style={styles.headerBadgeText}>{convs.length}</Text>
+              </View>
+            )}
+          </View>
+          <View style={{ width: 40 }} />
         </View>
 
         {loading ? (
           <View style={styles.centered}>
-            <ActivityIndicator size="large" color={D.blue} />
+            <ActivityIndicator size="large" color="#2DBD7E" />
           </View>
         ) : (
           <FlatList
             data={convs}
             keyExtractor={(item, i) => item.contact?._id || String(i)}
             renderItem={renderItem}
-            contentContainerStyle={{ paddingVertical: 8 }}
+            contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
             ItemSeparatorComponent={() => <View style={styles.separator} />}
             ListEmptyComponent={
               <View style={styles.empty}>
-                <Text style={styles.emptyIcon}>💬</Text>
-                <Text style={styles.emptyTitle}>Aucune conversation</Text>
-                <Text style={styles.emptySub}>
-                  Contactez l'auteur d'une publication pour démarrer une conversation.
-                </Text>
+                <View style={styles.emptyIconWrap}>
+                  <FontAwesome6 name="comments" size={38} color="#2DBD7E" />
+                </View>
+                <Text style={styles.emptyTitle}>{t('conversations.noConversations')}</Text>
+                <Text style={styles.emptySub}>{t('conversations.noConversationsSub')}</Text>
               </View>
             }
           />
         )}
       </SafeAreaView>
-    </DarkBackground>
+    </View>
   );
 }
 
@@ -132,58 +144,84 @@ const styles = StyleSheet.create({
   safe:     { flex: 1, backgroundColor: 'transparent' },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
+  // ── Header
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingVertical: 14,
-    backgroundColor: D.glass, borderBottomWidth: 1, borderBottomColor: D.glassBorder,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1, borderBottomColor: '#F0F0F0',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06, shadowRadius: 8, elevation: 4,
   },
   backBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: D.glass, borderWidth: 1, borderColor: D.glassBorder,
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB',
     justifyContent: 'center', alignItems: 'center',
   },
-  backIcon:    { fontSize: 18, color: D.white, fontWeight: '700' },
-  headerTitle: { fontSize: 18, fontWeight: '800', color: D.white },
+  headerCenter: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerTitle:  { fontSize: 18, fontWeight: '800', color: '#1A1A2E', letterSpacing: -0.3 },
+  headerBadge:  { backgroundColor: '#2DBD7E', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 2 },
+  headerBadgeText: { fontSize: 12, fontWeight: '800', color: '#FFFFFF' },
 
+  // ── List
+  listContent: { paddingVertical: 8, paddingHorizontal: 0 },
+
+  // ── Row
   row: {
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 16, paddingVertical: 14,
-    backgroundColor: D.glass, gap: 14,
-    borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: '#FFFFFF', gap: 14,
   },
-  separator: { height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginLeft: 82 },
+  separator: { height: 1, backgroundColor: '#F3F4F6', marginLeft: 82 },
 
+  // ── Avatar
+  avatarWrap: { position: 'relative' },
   avatar: {
     width: 52, height: 52, borderRadius: 26,
-    backgroundColor: D.blue,
+    backgroundColor: '#2DBD7E',
     justifyContent: 'center', alignItems: 'center',
-    ...shadow.blue,
+    shadowColor: '#2DBD7E', shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25, shadowRadius: 6, elevation: 4,
   },
-  avatarLetter: { color: D.white, fontSize: 20, fontWeight: '800' },
+  avatarUnread: {
+    backgroundColor: '#3B7EF6',
+    shadowColor: '#3B7EF6',
+  },
+  avatarLetter: { color: '#FFFFFF', fontSize: 20, fontWeight: '800' },
   onlineDot: {
-    position: 'absolute', bottom: 2, right: 2,
-    width: 12, height: 12, borderRadius: 6,
-    backgroundColor: D.green, borderWidth: 2, borderColor: D.navy,
+    position: 'absolute', bottom: 1, right: 1,
+    width: 13, height: 13, borderRadius: 7,
+    backgroundColor: '#2DBD7E', borderWidth: 2, borderColor: '#FFFFFF',
   },
 
+  // ── Row body
   rowBody:   { flex: 1, gap: 4 },
   rowTop:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   rowBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
 
-  name:        { fontSize: 15, color: D.white, fontWeight: '600', flex: 1 },
-  nameBold:    { fontWeight: '800' },
-  time:        { fontSize: 12, color: D.textFaint },
-  preview:     { fontSize: 13, color: D.textDim, flex: 1 },
-  previewBold: { color: D.white, fontWeight: '600' },
+  name:        { fontSize: 15, color: '#1A1A2E', fontWeight: '600', flex: 1 },
+  nameBold:    { fontWeight: '800', color: '#1A1A2E' },
+  time:        { fontSize: 12, color: '#9CA3AF' },
+  preview:     { fontSize: 13, color: '#9CA3AF', flex: 1 },
+  previewBold: { color: '#4B5563', fontWeight: '600' },
 
   badge: {
-    minWidth: 20, height: 20, borderRadius: 10,
-    backgroundColor: D.blue, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 5,
+    minWidth: 22, height: 22, borderRadius: 11,
+    backgroundColor: '#2DBD7E',
+    justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6,
+    shadowColor: '#2DBD7E', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3, shadowRadius: 4, elevation: 3,
   },
-  badgeText: { color: D.white, fontSize: 11, fontWeight: '800' },
+  badgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
 
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80, paddingHorizontal: 40, gap: 10 },
-  emptyIcon:  { fontSize: 52 },
-  emptyTitle: { fontSize: 18, fontWeight: '800', color: D.white },
-  emptySub:   { fontSize: 13, color: D.textDim, textAlign: 'center', lineHeight: 20 },
+  // ── Empty state
+  empty: { alignItems: 'center', paddingTop: 80, paddingHorizontal: 40, gap: 12 },
+  emptyIconWrap: {
+    width: 76, height: 76, borderRadius: 38,
+    backgroundColor: 'rgba(45,189,126,0.10)',
+    justifyContent: 'center', alignItems: 'center',
+    marginBottom: 4,
+  },
+  emptyTitle: { fontSize: 18, fontWeight: '800', color: '#1A1A2E' },
+  emptySub:   { fontSize: 13, color: '#9CA3AF', textAlign: 'center', lineHeight: 20 },
 });

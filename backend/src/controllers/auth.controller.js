@@ -1,7 +1,20 @@
 // src/controllers/auth.controller.js
 const jwt          = require('jsonwebtoken');
+const https        = require('https');
 const User         = require('../models/User.model');
 const emailService = require('../services/email.service');
+
+// ─── Helper : fetch HTTPS simple (sans dépendance externe) ───────────────────
+const fetchJSON = (url) => new Promise((resolve, reject) => {
+  https.get(url, (res) => {
+    let data = '';
+    res.on('data', chunk => { data += chunk; });
+    res.on('end', () => {
+      try { resolve({ ok: res.statusCode < 400, data: JSON.parse(data) }); }
+      catch { reject(new Error('JSON parse error')); }
+    });
+  }).on('error', reject);
+});
 
 // ─── Helpers JWT ──────────────────────────────────────────────────────────────
 const signAccess = (id, role) =>
@@ -369,6 +382,32 @@ exports.forgotPassword = async (req, res) => {
   }
 };
 
+// ─── POST /api/auth/verify-reset-code ────────────────────────────────────────
+exports.verifyResetCode = async (req, res) => {
+  try {
+    const { email, code } = req.body;
+    if (!email || !code)
+      return res.status(400).json({ message: 'Email et code requis' });
+
+    const user = await User.findOne({ email }).select('+passwordResetCode +passwordResetExpires');
+    if (!user) return res.status(404).json({ message: 'Utilisateur introuvable' });
+
+    if (!user.passwordResetCode || !user.passwordResetExpires)
+      return res.status(400).json({ message: 'Aucune demande de réinitialisation en cours' });
+
+    if (user.passwordResetExpires < new Date())
+      return res.status(400).json({ message: 'Code expiré. Faites une nouvelle demande.' });
+
+    if (user.passwordResetCode !== code)
+      return res.status(400).json({ message: 'Code incorrect' });
+
+    res.json({ message: 'Code valide' });
+  } catch (err) {
+    console.error('[VERIFY-RESET-CODE]', err);
+    res.status(500).json({ message: 'Erreur serveur', error: err.message });
+  }
+};
+
 // ─── POST /api/auth/reset-password ───────────────────────────────────────────
 exports.resetPassword = async (req, res) => {
   try {
@@ -410,5 +449,85 @@ exports.logout = async (req, res) => {
     res.json({ message: 'Déconnexion réussie' });
   } catch (err) {
     res.status(500).json({ message: 'Erreur serveur' });
+  }
+};
+
+// ─── POST /api/auth/social ────────────────────────────────────────────────────
+exports.socialLogin = async (req, res) => {
+  try {
+    const { provider, token, name = '', email = '' } = req.body;
+    if (!provider || !token)
+      return res.status(400).json({ message: 'provider et token requis' });
+
+    let socialId, verifiedEmail, verifiedName;
+
+    // ── Google — vérification via tokeninfo ───────────────────────────────────
+    if (provider === 'google') {
+      const { ok, data } = await fetchJSON(
+        `https://oauth2.googleapis.com/tokeninfo?id_token=${token}`
+      );
+      if (!ok || !data.sub)
+        return res.status(401).json({ message: 'Token Google invalide' });
+      socialId      = data.sub;
+      verifiedEmail = data.email;
+      verifiedName  = data.name || name;
+
+    // ── Facebook — vérification via Graph API ─────────────────────────────────
+    } else if (provider === 'facebook') {
+      const { ok, data } = await fetchJSON(
+        `https://graph.facebook.com/me?access_token=${token}&fields=id,name,email`
+      );
+      if (!ok || data.error || !data.id)
+        return res.status(401).json({ message: 'Token Facebook invalide' });
+      socialId      = data.id;
+      verifiedEmail = data.email || email;
+      verifiedName  = data.name  || name;
+
+    // ── Apple — décodage du JWT identityToken ─────────────────────────────────
+    } else if (provider === 'apple') {
+      const decoded = jwt.decode(token);
+      if (!decoded || !decoded.sub)
+        return res.status(401).json({ message: 'Token Apple invalide' });
+      socialId      = decoded.sub;
+      verifiedEmail = decoded.email || email;
+      verifiedName  = name;
+
+    } else {
+      return res.status(400).json({ message: 'Provider non supporté' });
+    }
+
+    // ── Trouver ou créer l'utilisateur ────────────────────────────────────────
+    const idField = `${provider}Id`;   // 'googleId' | 'facebookId' | 'appleId'
+    let user = await User.findOne({ [idField]: socialId });
+
+    if (!user && verifiedEmail) {
+      user = await User.findOne({ email: verifiedEmail.toLowerCase() });
+    }
+
+    if (!user) {
+      const parts = (verifiedName || '').trim().split(' ');
+      user = await User.create({
+        [idField]:       socialId,
+        email:           verifiedEmail ? verifiedEmail.toLowerCase() : undefined,
+        prenom:          parts[0] || '',
+        nom:             parts.slice(1).join(' ') || '',
+        isEmailVerified: true,
+        isActive:        true,
+      });
+    } else if (!user[idField]) {
+      user[idField] = socialId;
+      await user.save({ validateBeforeSave: false });
+    }
+
+    const accessToken  = signAccess(user._id, user.role);
+    const refreshToken = signRefresh(user._id);
+    user.refreshToken  = refreshToken;
+    user.lastLogin     = new Date();
+    await user.save({ validateBeforeSave: false });
+
+    res.json({ accessToken, refreshToken, user: user.toPublic() });
+  } catch (err) {
+    console.error('[SOCIAL LOGIN]', err);
+    res.status(500).json({ message: 'Erreur serveur', error: err.message });
   }
 };

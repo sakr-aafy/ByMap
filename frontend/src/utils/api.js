@@ -13,7 +13,42 @@ export const saveSession = async (accessToken, refreshToken, user) => {
   ]);
 };
 
-export const getAccessToken = () => AsyncStorage.getItem('accessToken');
+export const getAccessToken  = () => AsyncStorage.getItem('accessToken');
+export const getRefreshToken = () => AsyncStorage.getItem('refreshToken');
+
+// Refreshes the access token silently; throws if refresh token is also expired.
+async function refreshAccessToken() {
+  const refreshToken = await getRefreshToken();
+  if (!refreshToken) throw new Error('Session expirée');
+  const res  = await fetch(`${API_URL}/auth/refresh`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ refreshToken }),
+  });
+  const data = await res.json();
+  if (!res.ok) { await clearSession(); throw new Error('Session expirée'); }
+  await AsyncStorage.multiSet([
+    ['accessToken',  data.accessToken],
+    ['refreshToken', data.refreshToken],
+  ]);
+  return data.accessToken;
+}
+
+// Authenticated fetch that retries once after refreshing on 401.
+async function authFetch(url, options = {}) {
+  let token = await getAccessToken();
+  const makeHeaders = (t) => ({
+    ...options.headers,
+    Authorization: `Bearer ${t}`,
+  });
+
+  let res = await fetch(url, { ...options, headers: makeHeaders(token) });
+  if (res.status === 401) {
+    token = await refreshAccessToken();
+    res   = await fetch(url, { ...options, headers: makeHeaders(token) });
+  }
+  return res;
+}
 
 export const getCurrentUser = async () => {
   const raw = await AsyncStorage.getItem('currentUser');
@@ -103,6 +138,45 @@ export async function verifyLoginOtp({ email, code }) {
   if (!res.ok) throw new Error(data.message || 'Code invalide');
   await saveSession(data.accessToken, data.refreshToken, data.user);
   return data;
+}
+
+// ─── POST /api/auth/social ───────────────────────────────────────────────────
+export async function socialLogin({ provider, token, name, email }) {
+  const res  = await fetch(`${API_URL}/auth/social`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ provider, token, name, email }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || `Connexion ${provider} échouée`);
+  await saveSession(data.accessToken, data.refreshToken, data.user);
+  return data;
+}
+
+// ─── Favorites ────────────────────────────────────────────────────────────────
+export async function getFavorites() {
+  const res  = await authFetch(`${API_URL}/favorites`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || 'Erreur favoris');
+  return data;
+}
+
+export async function checkFavorite(zoneName) {
+  const res  = await authFetch(`${API_URL}/favorites/check?zoneName=${encodeURIComponent(zoneName)}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || 'Erreur vérification favori');
+  return data.favorited;
+}
+
+export async function toggleFavorite(zoneName, lat, lng) {
+  const res  = await authFetch(`${API_URL}/favorites/toggle`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ zoneName, lat, lng }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || 'Erreur toggle favori');
+  return data.favorited;
 }
 
 // ─── POST /api/auth/logout ────────────────────────────────────────────────────

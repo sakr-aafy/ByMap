@@ -10,8 +10,10 @@ router.post('/resend-verification', ctrl.resendVerification);
 router.post('/login',               ctrl.login);
 router.post('/refresh',             ctrl.refresh);
 router.post('/verify-login-otp',    ctrl.verifyLoginOtp);
-router.post('/forgot-password',     ctrl.forgotPassword);
+router.post('/forgot-password',      ctrl.forgotPassword);
+router.post('/verify-reset-code',   ctrl.verifyResetCode);
 router.post('/reset-password',      ctrl.resetPassword);
+router.post('/social',              ctrl.socialLogin);
 
 // Protégée
 router.post('/logout', protect, ctrl.logout);

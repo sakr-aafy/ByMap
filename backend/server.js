@@ -14,6 +14,7 @@ const userRoutes        = require('./src/routes/user.routes');
 const adminRoutes       = require('./src/routes/admin.routes');
 const publicationRoutes = require('./src/routes/publication.routes');
 const messageRoutes     = require('./src/routes/message.routes');
+const favoriteRoutes    = require('./src/routes/favorite.routes');
 
 const app        = express();
 const httpServer = http.createServer(app);
@@ -39,6 +40,7 @@ app.use('/api/users',       userRoutes);
 app.use('/api/admin',       adminRoutes);
 app.use('/api/publications', publicationRoutes);
 app.use('/api/messages',    messageRoutes);
+app.use('/api/favorites',   favoriteRoutes);
 
 // ─── Route de santé ───────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'OK', timestamp: new Date() }));

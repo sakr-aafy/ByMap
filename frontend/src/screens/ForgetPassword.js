@@ -1,10 +1,12 @@
 // src/screens/ForgetPassword.js
 import React, { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   StyleSheet, View, Text, TextInput, TouchableOpacity,
-  SafeAreaView, KeyboardAvoidingView, Platform, ScrollView,
+  KeyboardAvoidingView, Platform, ScrollView,
   ActivityIndicator, Animated,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -96,6 +98,7 @@ function CodeInput({ value, onChange }) {
 // ── Écran principal ───────────────────────────────────────────────────────────
 export default function ForgetPassword() {
   const navigation = useNavigation();
+  const { t }      = useTranslation();
 
   const [step,        setStep]        = useState('email');
   const [email,       setEmail]       = useState('');
@@ -114,12 +117,12 @@ export default function ForgetPassword() {
 
   useEffect(() => {
     if (countdown <= 0) return;
-    const t = setTimeout(() => setCountdown(c => c - 1), 1000);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setCountdown(c => c - 1), 1000);
+    return () => clearTimeout(timer);
   }, [countdown]);
 
   const handleSendCode = async () => {
-    if (!email.trim()) { setError('Veuillez saisir votre email.'); return; }
+    if (!email.trim()) { setError(t('forgetPassword.errEmail')); return; }
     setError(''); setLoading(true);
     try {
       const res  = await fetch(`${API_URL}/auth/forgot-password`, {
@@ -129,7 +132,7 @@ export default function ForgetPassword() {
       const data = await res.json();
       if (!res.ok) { setError(data.message); return; }
       fadeAnim.setValue(0); setStep('code'); setCountdown(60);
-    } catch { setError('Erreur réseau. Vérifiez votre connexion.'); }
+    } catch { setError(t('common.networkError')); }
     finally  { setLoading(false); }
   };
 
@@ -145,14 +148,24 @@ export default function ForgetPassword() {
     } finally { setLoading(false); }
   };
 
-  const handleVerifyCode = () => {
-    if (code.length < 6) { setError('Entrez les 6 chiffres du code.'); return; }
-    setError(''); fadeAnim.setValue(0); setStep('password');
+  const handleVerifyCode = async () => {
+    if (code.length < 6) { setError(t('forgetPassword.errCode')); return; }
+    setError(''); setLoading(true);
+    try {
+      const res  = await fetch(`${API_URL}/auth/verify-reset-code`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), code }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.message); return; }
+      fadeAnim.setValue(0); setStep('password');
+    } catch { setError(t('common.networkError')); }
+    finally  { setLoading(false); }
   };
 
   const handleReset = async () => {
-    if (newPassword.length < 6) { setError('Le mot de passe doit contenir au moins 6 caractères.'); return; }
-    if (newPassword !== confirm)  { setError('Les mots de passe ne correspondent pas.'); return; }
+    if (newPassword.length < 6) { setError(t('forgetPassword.errMin6')); return; }
+    if (newPassword !== confirm)  { setError(t('forgetPassword.errMatch')); return; }
     setError(''); setLoading(true);
     try {
       const res  = await fetch(`${API_URL}/auth/reset-password`, {
@@ -162,15 +175,15 @@ export default function ForgetPassword() {
       const data = await res.json();
       if (!res.ok) { setError(data.message); return; }
       fadeAnim.setValue(0); setStep('success');
-    } catch { setError('Erreur réseau. Vérifiez votre connexion.'); }
+    } catch { setError(t('common.networkError')); }
     finally  { setLoading(false); }
   };
 
   const meta = {
-    email:    { title: 'Mot de passe oublié ?', sub: 'Entrez votre email pour recevoir un code de réinitialisation.', icon: '🔑' },
-    code:     { title: 'Vérification',          sub: `Code envoyé à ${email}`,                                         icon: '📧' },
-    password: { title: 'Nouveau mot de passe',  sub: 'Choisissez un mot de passe sécurisé.',                           icon: '🔒' },
-    success:  { title: 'Mot de passe modifié !', sub: 'Vous pouvez maintenant vous connecter.',                        icon: '✅' },
+    email:    { title: t('forgetPassword.title'),       sub: t('forgetPassword.subtitle'),                        icon: '🔑' },
+    code:     { title: t('forgetPassword.stepVerif'),   sub: t('forgetPassword.codeSentTo', { email }),           icon: '📧' },
+    password: { title: t('forgetPassword.stepNewPass'), sub: t('forgetPassword.stepNewPassSub'),                  icon: '🔒' },
+    success:  { title: t('forgetPassword.stepSuccess'), sub: t('forgetPassword.stepSuccessSub'),                  icon: '✅' },
   }[step];
 
   return (
@@ -202,7 +215,7 @@ export default function ForgetPassword() {
                 <View style={styles.form}>
                   <Field
                     icon="✉"
-                    placeholder="votre@email.com"
+                    placeholder={t('forgetPassword.emailPlaceholder')}
                     value={email}
                     onChangeText={v => { setEmail(v); setError(''); }}
                     keyboardType="email-address"
@@ -213,7 +226,7 @@ export default function ForgetPassword() {
                     onPress={handleSendCode} disabled={loading} activeOpacity={0.88}
                   >
                     <LinearGradient colors={G.blue} style={styles.primaryBtn}>
-                      {loading ? <ActivityIndicator color={D.white} /> : <Text style={styles.primaryBtnText}>Envoyer le code</Text>}
+                      {loading ? <ActivityIndicator color={D.white} /> : <Text style={styles.primaryBtnText}>{t('forgetPassword.sendCode')}</Text>}
                     </LinearGradient>
                   </TouchableOpacity>
                 </View>
@@ -229,12 +242,12 @@ export default function ForgetPassword() {
                     onPress={handleVerifyCode} disabled={loading} activeOpacity={0.88}
                   >
                     <LinearGradient colors={G.blue} style={styles.primaryBtn}>
-                      {loading ? <ActivityIndicator color={D.white} /> : <Text style={styles.primaryBtnText}>Vérifier le code</Text>}
+                      {loading ? <ActivityIndicator color={D.white} /> : <Text style={styles.primaryBtnText}>{t('forgetPassword.verifyCode')}</Text>}
                     </LinearGradient>
                   </TouchableOpacity>
                   <TouchableOpacity onPress={handleResend} disabled={countdown > 0} activeOpacity={0.7}>
                     <Text style={[styles.resendText, countdown > 0 && styles.resendDisabled]}>
-                      {countdown > 0 ? `Renvoyer le code dans ${countdown}s` : 'Renvoyer le code'}
+                      {countdown > 0 ? t('forgetPassword.resendIn', { countdown }) : t('forgetPassword.resend')}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -243,14 +256,14 @@ export default function ForgetPassword() {
               {/* Étape 3 — Nouveau mot de passe */}
               {step === 'password' && (
                 <View style={styles.form}>
-                  <Field icon="🔒" placeholder="Nouveau mot de passe"   value={newPassword} onChangeText={v => { setNewPassword(v); setError(''); }} secureTextEntry />
-                  <Field icon="🔒" placeholder="Confirmer le mot de passe" value={confirm}  onChangeText={v => { setConfirm(v);    setError(''); }} secureTextEntry error={error} />
+                  <Field icon="🔒" placeholder={t('forgetPassword.newPassword')}     value={newPassword} onChangeText={v => { setNewPassword(v); setError(''); }} secureTextEntry />
+                  <Field icon="🔒" placeholder={t('forgetPassword.confirmPassword')} value={confirm}     onChangeText={v => { setConfirm(v);    setError(''); }} secureTextEntry error={error} />
                   <TouchableOpacity
                     style={[styles.primaryBtnWrap, loading && { opacity: 0.7 }]}
                     onPress={handleReset} disabled={loading} activeOpacity={0.88}
                   >
                     <LinearGradient colors={G.blue} style={styles.primaryBtn}>
-                      {loading ? <ActivityIndicator color={D.white} /> : <Text style={styles.primaryBtnText}>Réinitialiser</Text>}
+                      {loading ? <ActivityIndicator color={D.white} /> : <Text style={styles.primaryBtnText}>{t('forgetPassword.reset')}</Text>}
                     </LinearGradient>
                   </TouchableOpacity>
                 </View>
@@ -261,7 +274,7 @@ export default function ForgetPassword() {
                 <View style={styles.form}>
                   <TouchableOpacity style={styles.primaryBtnWrap} onPress={() => navigation.navigate('Login')} activeOpacity={0.88}>
                     <LinearGradient colors={G.blue} style={styles.primaryBtn}>
-                      <Text style={styles.primaryBtnText}>Se connecter</Text>
+                      <Text style={styles.primaryBtnText}>{t('forgetPassword.loginNow')}</Text>
                     </LinearGradient>
                   </TouchableOpacity>
                 </View>

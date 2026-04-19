@@ -69,13 +69,19 @@ exports.deleteUser = async (req, res) => {
 // ─── GET /api/admin/stats ─────────────────────────────────────────────────────
 exports.getStats = async (req, res) => {
   try {
-    const [total, active, admins, recent] = await Promise.all([
+    const Publication = require('../models/Publication.model');
+
+    const [totalUsers, activeUsers, recentSignups, totalPublications, gouvernorats] = await Promise.all([
       User.countDocuments(),
       User.countDocuments({ isActive: true }),
-      User.countDocuments({ role: 'admin' }),
       User.countDocuments({ createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } }),
+      Publication.countDocuments(),
+      Publication.distinct('localisation.gouvernorat'),
     ]);
-    res.json({ total, active, admins, recentSignups: recent });
+
+    const lieux = gouvernorats.filter(g => g && g.trim()).length;
+
+    res.json({ totalUsers, activeUsers, recentSignups, totalPublications, lieux });
   } catch (err) {
     res.status(500).json({ message: 'Erreur serveur' });
   }

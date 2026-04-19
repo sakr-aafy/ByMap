@@ -1,51 +1,38 @@
 // src/screens/Messages.js
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { FontAwesome6 } from '@expo/vector-icons';
 import {
   StyleSheet, View, Text, TextInput, TouchableOpacity,
-  FlatList, SafeAreaView, KeyboardAvoidingView, Platform,
-  ActivityIndicator, Modal,
+  FlatList, KeyboardAvoidingView, Platform,
+  ActivityIndicator,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import io from 'socket.io-client';
 import { API_URL } from '../environments/environment';
-import { D, G, shadow, DarkBackground } from '../theme/index';
-
-const SERVER_BASE = API_URL.replace('/api', '');
+import { useCall } from '../context/CallContext';
 
 export default function Messages() {
   const navigation = useNavigation();
   const route      = useRoute();
   const { recipient } = route.params;
 
-  const [messages,     setMessages]     = useState([]);
-  const [text,         setText]         = useState('');
-  const [loading,      setLoading]      = useState(true);
-  const [sending,      setSending]      = useState(false);
-  const [myId,         setMyId]         = useState(null);
-  const [incomingCall, setIncomingCall] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [text,     setText]     = useState('');
+  const [loading,  setLoading]  = useState(true);
+  const [sending,  setSending]  = useState(false);
+  const [myId,     setMyId]     = useState(null);
 
-  const flatRef   = useRef(null);
-  const pollRef   = useRef(null);
-  const socketRef = useRef(null);
+  const flatRef  = useRef(null);
+  const pollRef  = useRef(null);
 
-  // ── Init socket ────────────────────────────────────────────────────────────
+  const { socketRef } = useCall();
+
+  // ── Get local userId ───────────────────────────────────────────────────────
   useEffect(() => {
-    let mounted = true;
-    AsyncStorage.getItem('userId').then(userId => {
-      if (!userId) return;
-      setMyId(userId);
-      const socket = io(SERVER_BASE, { transports: ['websocket'] });
-      socketRef.current = socket;
-      socket.on('connect', () => socket.emit('register', userId));
-      socket.on('incoming-call', ({ callerName, from, offer }) => {
-        if (!mounted) return;
-        if (String(from) === String(recipient._id)) setIncomingCall({ callerName, offer });
-      });
-    });
-    return () => { mounted = false; socketRef.current?.disconnect(); };
-  }, [recipient._id]);
+    AsyncStorage.getItem('userId').then(id => { if (id) setMyId(id); });
+  }, []);
 
   // ── Fetch messages ─────────────────────────────────────────────────────────
   const fetchMessages = useCallback(async () => {
@@ -88,9 +75,19 @@ export default function Messages() {
     finally { setSending(false); }
   };
 
-  const handleCall   = () => navigation.navigate('Call', { recipient, isIncoming: false });
-  const acceptCall   = () => { const offer = incomingCall.offer; setIncomingCall(null); navigation.navigate('Call', { recipient, isIncoming: true, offer }); };
-  const rejectCall   = () => { socketRef.current?.emit('call-reject', { to: recipient._id }); setIncomingCall(null); };
+  const handleCall = async () => {
+    const [userId, userName] = await Promise.all([
+      AsyncStorage.getItem('userId'),
+      AsyncStorage.getItem('userName'),
+    ]);
+    socketRef.current?.emit('call-offer', {
+      to:         recipient._id,
+      offer:      null,
+      callerId:   userId,
+      callerName: userName || 'Utilisateur',
+    });
+    navigation.navigate('Call', { recipient, isIncoming: false });
+  };
 
   const renderItem = ({ item, index }) => {
     const isMe    = item.sender?._id === myId || item.sender === myId;
@@ -99,7 +96,13 @@ export default function Messages() {
     const timeStr = new Date(item.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
     return (
       <View>
-        {showTime && <Text style={styles.timeLabel}>{timeStr}</Text>}
+        {showTime && (
+          <View style={styles.timeLabelRow}>
+            <View style={styles.timeLabelLine} />
+            <Text style={styles.timeLabel}>{timeStr}</Text>
+            <View style={styles.timeLabelLine} />
+          </View>
+        )}
         <View style={[styles.bubbleRow, isMe ? styles.rowMe : styles.rowOther]}>
           <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleOther]}>
             <Text style={[styles.bubbleText, isMe && styles.bubbleTextMe]}>{item.content}</Text>
@@ -110,53 +113,34 @@ export default function Messages() {
   };
 
   const recipientName = `${recipient.prenom || ''} ${recipient.nom || ''}`.trim() || 'Contact';
+  const initial = recipient.prenom?.[0]?.toUpperCase() || '?';
 
   return (
-    <DarkBackground style={{ flex: 1 }}>
-      <StatusBar style="light" />
+    <View style={{ flex: 1, backgroundColor: '#F2F5F3' }}>
+      <StatusBar style="dark" />
       <SafeAreaView style={styles.safe}>
-
-        {/* ── Bannière appel entrant ── */}
-        {incomingCall && (
-          <Modal transparent animationType="slide">
-            <View style={styles.incomingOverlay}>
-              <View style={styles.incomingCard}>
-                <View style={styles.incomingAvatar}>
-                  <Text style={styles.incomingLetter}>{recipient.prenom?.[0]?.toUpperCase() || '?'}</Text>
-                </View>
-                <Text style={styles.incomingName}>{incomingCall.callerName || recipientName}</Text>
-                <Text style={styles.incomingLabel}>Appel vocal entrant…</Text>
-                <View style={styles.incomingBtns}>
-                  <TouchableOpacity style={styles.rejectBtn} onPress={rejectCall}>
-                    <Text style={styles.callBtnIcon}>📵</Text>
-                    <Text style={styles.callBtnLabel}>Refuser</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.acceptBtn} onPress={acceptCall}>
-                    <Text style={styles.callBtnIcon}>📞</Text>
-                    <Text style={styles.callBtnLabel}>Accepter</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          </Modal>
-        )}
 
         {/* ── Header ── */}
         <View style={styles.header}>
           <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.7}>
-            <Text style={styles.backIcon}>←</Text>
+            <FontAwesome6 name="arrow-left" size={16} color="#1A1A2E" />
           </TouchableOpacity>
+
           <View style={styles.headerCenter}>
             <View style={styles.avatarCircle}>
-              <Text style={styles.avatarLetter}>{recipient.prenom?.[0]?.toUpperCase() || '?'}</Text>
+              <Text style={styles.avatarLetter}>{initial}</Text>
             </View>
             <View>
               <Text style={styles.headerName}>{recipientName}</Text>
-              <Text style={styles.headerSub}>En ligne</Text>
+              <View style={styles.onlineRow}>
+                <View style={styles.onlineDot} />
+                <Text style={styles.headerSub}>En ligne</Text>
+              </View>
             </View>
           </View>
+
           <TouchableOpacity style={styles.callBtn} onPress={handleCall} activeOpacity={0.7}>
-            <Text style={styles.callIcon}>📞</Text>
+            <FontAwesome6 name="phone" size={16} color="#2DBD7E" />
           </TouchableOpacity>
         </View>
 
@@ -167,7 +151,9 @@ export default function Messages() {
           keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
           {loading ? (
-            <View style={styles.centered}><ActivityIndicator size="large" color={D.blue} /></View>
+            <View style={styles.centered}>
+              <ActivityIndicator size="large" color="#2DBD7E" />
+            </View>
           ) : (
             <FlatList
               ref={flatRef}
@@ -176,18 +162,26 @@ export default function Messages() {
               renderItem={renderItem}
               contentContainerStyle={styles.listContent}
               showsVerticalScrollIndicator={false}
-              ListEmptyComponent={<Text style={styles.emptyText}>Démarrez la conversation avec {recipientName}</Text>}
+              ListEmptyComponent={
+                <View style={styles.emptyBox}>
+                  <View style={styles.emptyIconWrap}>
+                    <FontAwesome6 name="comments" size={38} color="#2DBD7E" />
+                  </View>
+                  <Text style={styles.emptyTitle}>Aucun message</Text>
+                  <Text style={styles.emptyText}>Démarrez la conversation avec {recipientName}</Text>
+                </View>
+              }
             />
           )}
 
-          {/* ── Input ── */}
+          {/* ── Input bar ── */}
           <View style={styles.inputBar}>
             <TextInput
               style={styles.input}
               value={text}
               onChangeText={setText}
               placeholder="Écrire un message…"
-              placeholderTextColor={D.textFaint}
+              placeholderTextColor="#9CA3AF"
               multiline
               maxLength={1000}
             />
@@ -197,98 +191,116 @@ export default function Messages() {
               disabled={!text.trim() || sending}
               activeOpacity={0.8}
             >
-              {sending ? <ActivityIndicator size="small" color={D.white} /> : <Text style={styles.sendIcon}>➤</Text>}
+              {sending
+                ? <ActivityIndicator size="small" color="#FFFFFF" />
+                : <FontAwesome6 name="paper-plane" size={16} color="#FFFFFF" />}
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
-    </DarkBackground>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: 'transparent' },
 
-  incomingOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' },
-  incomingCard: {
-    backgroundColor: D.navyMid,
-    borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    borderWidth: 1, borderColor: D.glassBorder,
-    padding: 30, alignItems: 'center', gap: 10,
-  },
-  incomingAvatar: {
-    width: 80, height: 80, borderRadius: 40,
-    backgroundColor: D.blue,
-    justifyContent: 'center', alignItems: 'center', marginBottom: 6,
-    ...shadow.blue,
-  },
-  incomingLetter:  { fontSize: 36, color: D.white, fontWeight: '800' },
-  incomingName:    { fontSize: 22, fontWeight: '800', color: D.white },
-  incomingLabel:   { fontSize: 13, color: D.textDim, marginBottom: 10 },
-  incomingBtns:    { flexDirection: 'row', gap: 40, marginTop: 10 },
-  rejectBtn:  { alignItems: 'center', gap: 6, backgroundColor: D.red,   width: 70, height: 70, borderRadius: 35, justifyContent: 'center' },
-  acceptBtn:  { alignItems: 'center', gap: 6, backgroundColor: D.green, width: 70, height: 70, borderRadius: 35, justifyContent: 'center' },
-  callBtnIcon:  { fontSize: 28 },
-  callBtnLabel: { fontSize: 11, color: D.white, fontWeight: '700' },
-
+  // ── Header
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingVertical: 12,
-    backgroundColor: D.glass, borderBottomWidth: 1, borderBottomColor: D.glassBorder,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1, borderBottomColor: '#F0F0F0',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06, shadowRadius: 8, elevation: 4,
   },
   backBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: D.glass, borderWidth: 1, borderColor: D.glassBorder,
-    justifyContent: 'center', alignItems: 'center',
-  },
-  backIcon:  { fontSize: 18, color: D.white, fontWeight: '700' },
-  callBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: D.greenGlow, borderWidth: 1, borderColor: D.green,
-    justifyContent: 'center', alignItems: 'center',
-  },
-  callIcon: { fontSize: 18 },
-  headerCenter:  { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  avatarCircle: {
     width: 40, height: 40, borderRadius: 20,
-    backgroundColor: D.blue, justifyContent: 'center', alignItems: 'center',
-    ...shadow.blue,
+    backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB',
+    justifyContent: 'center', alignItems: 'center',
   },
-  avatarLetter: { color: D.white, fontWeight: '800', fontSize: 16 },
-  headerName:   { fontSize: 15, fontWeight: '700', color: D.white },
-  headerSub:    { fontSize: 11, color: D.green },
+  callBtn: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: 'rgba(45,189,126,0.12)', borderWidth: 1, borderColor: '#2DBD7E',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  headerCenter: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  avatarCircle: {
+    width: 42, height: 42, borderRadius: 21,
+    backgroundColor: '#2DBD7E',
+    justifyContent: 'center', alignItems: 'center',
+    shadowColor: '#2DBD7E', shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3, shadowRadius: 6, elevation: 4,
+  },
+  avatarLetter: { color: '#FFFFFF', fontWeight: '800', fontSize: 17 },
+  headerName:   { fontSize: 15, fontWeight: '700', color: '#1A1A2E' },
+  onlineRow:    { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },
+  onlineDot:    { width: 7, height: 7, borderRadius: 4, backgroundColor: '#2DBD7E' },
+  headerSub:    { fontSize: 11, color: '#2DBD7E', fontWeight: '600' },
 
+  // ── List
   listContent: { padding: 16, gap: 4, paddingBottom: 8 },
   centered:    { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  emptyText:   { textAlign: 'center', color: D.textDim, marginTop: 60, fontSize: 14 },
-  timeLabel:   { textAlign: 'center', fontSize: 11, color: D.textFaint, marginVertical: 10 },
 
-  bubbleRow:   { flexDirection: 'row', marginVertical: 2 },
-  rowMe:       { justifyContent: 'flex-end' },
-  rowOther:    { justifyContent: 'flex-start' },
+  emptyBox: { alignItems: 'center', paddingTop: 80, gap: 12 },
+  emptyIconWrap: {
+    width: 76, height: 76, borderRadius: 38,
+    backgroundColor: 'rgba(45,189,126,0.10)',
+    justifyContent: 'center', alignItems: 'center',
+    marginBottom: 4,
+  },
+  emptyTitle: { fontSize: 16, fontWeight: '700', color: '#1A1A2E' },
+  emptyText:  { fontSize: 13, color: '#9CA3AF', textAlign: 'center', paddingHorizontal: 32 },
+
+  // ── Time label
+  timeLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginVertical: 12, paddingHorizontal: 8 },
+  timeLabelLine:{ flex: 1, height: 1, backgroundColor: '#E5E7EB' },
+  timeLabel:    { fontSize: 11, color: '#9CA3AF', fontWeight: '500' },
+
+  // ── Bubbles
+  bubbleRow:  { flexDirection: 'row', marginVertical: 2 },
+  rowMe:      { justifyContent: 'flex-end' },
+  rowOther:   { justifyContent: 'flex-start' },
   bubble: {
     maxWidth: '75%', borderRadius: 18,
     paddingHorizontal: 14, paddingVertical: 9,
-    ...shadow.soft,
   },
-  bubbleMe:    { backgroundColor: D.blue, borderBottomRightRadius: 4 },
-  bubbleOther: { backgroundColor: D.glassMid, borderBottomLeftRadius: 4, borderWidth: 1, borderColor: D.glassBorder },
-  bubbleText:  { fontSize: 14, color: D.white, lineHeight: 20 },
-  bubbleTextMe:{ color: D.white },
+  bubbleMe: {
+    backgroundColor: '#2DBD7E', borderBottomRightRadius: 4,
+    shadowColor: '#2DBD7E', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25, shadowRadius: 6, elevation: 3,
+  },
+  bubbleOther: {
+    backgroundColor: '#FFFFFF', borderBottomLeftRadius: 4,
+    borderWidth: 1, borderColor: '#E5E7EB',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05, shadowRadius: 4, elevation: 2,
+  },
+  bubbleText:   { fontSize: 14, color: '#4B5563', lineHeight: 20 },
+  bubbleTextMe: { color: '#FFFFFF' },
 
+  // ── Input bar
   inputBar: {
     flexDirection: 'row', alignItems: 'flex-end', gap: 10,
     paddingHorizontal: 16, paddingVertical: 10,
-    backgroundColor: D.navyMid, borderTopWidth: 1, borderTopColor: D.glassBorder,
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1, borderTopColor: '#F0F0F0',
+    shadowColor: '#000', shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.05, shadowRadius: 6, elevation: 6,
   },
   input: {
     flex: 1, minHeight: 44, maxHeight: 120,
-    backgroundColor: D.glassInput, borderRadius: 22,
-    paddingHorizontal: 16, paddingVertical: 10,
-    fontSize: 14, color: D.white,
-    borderWidth: 1, borderColor: D.glassBorder,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10,
+    fontSize: 14, color: '#1A1A2E',
+    borderWidth: 1, borderColor: '#E5E7EB',
   },
-  sendBtn:         { width: 44, height: 44, borderRadius: 22, backgroundColor: D.blue, justifyContent: 'center', alignItems: 'center', ...shadow.blue },
-  sendBtnDisabled: { backgroundColor: D.navyLight, shadowOpacity: 0 },
-  sendIcon:        { fontSize: 18, color: D.white, marginLeft: 2 },
+  sendBtn: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: '#2DBD7E',
+    justifyContent: 'center', alignItems: 'center',
+    shadowColor: '#2DBD7E', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35, shadowRadius: 8, elevation: 5,
+  },
+  sendBtnDisabled: { backgroundColor: '#D1D5DB', shadowOpacity: 0 },
 });

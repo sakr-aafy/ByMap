@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { FontAwesome6 } from '@expo/vector-icons';
 import {
   StyleSheet,
   View,
@@ -8,18 +9,19 @@ import {
   TouchableOpacity,
   Animated,
   Keyboard,
-  SafeAreaView,
   PanResponder,
   ActivityIndicator,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const LOGO = require('../../assets/logo.png');
 import { WebView } from 'react-native-webview';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { cachedGeocode, cachedZone, cachedSearch } from '../utils/cache';
-import { getCurrentUser, logout as apiLogout } from '../utils/api';
+import { getCurrentUser, logout as apiLogout, checkFavorite, toggleFavorite } from '../utils/api';
 import { API_URL } from '../environments/environment';
-import { D, shadow } from '../theme/index';
+import { D } from '../theme/index';
+import { useTranslation } from 'react-i18next';
 // Location removed — Tunis used as default
 
 const DEFAULT_COORDS = { latitude: 36.8065, longitude: 10.1815 };
@@ -32,7 +34,7 @@ const MAP_STYLES = [
   {
     key: 'street',
     label: 'Street',
-    icon: '🗺️',
+    icon: 'map',
     url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
     subdomains: ['a', 'b', 'c'],
     maxZoom: 19,
@@ -40,7 +42,7 @@ const MAP_STYLES = [
   {
     key: 'satellite',
     label: 'Satellite',
-    icon: '🛰️',
+    icon: 'satellite-dish',
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     subdomains: [''],
     maxZoom: 19,
@@ -48,7 +50,7 @@ const MAP_STYLES = [
   {
     key: 'relief',
     label: 'Relief',
-    icon: '⛰️',
+    icon: 'mountain',
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Shaded_Relief/MapServer/tile/{z}/{y}/{x}',
     subdomains: [''],
     maxZoom: 13,
@@ -56,7 +58,7 @@ const MAP_STYLES = [
   {
     key: 'topo',
     label: 'Topo',
-    icon: '🏔️',
+    icon: 'layer-group',
     url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
     subdomains: ['a', 'b', 'c'],
     maxZoom: 17,
@@ -64,7 +66,7 @@ const MAP_STYLES = [
   {
     key: 'dark',
     label: 'Dark',
-    icon: '🌑',
+    icon: 'moon',
     url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
     subdomains: ['a', 'b', 'c', 'd'],
     maxZoom: 19,
@@ -72,7 +74,7 @@ const MAP_STYLES = [
   {
     key: 'clair',
     label: 'Clair',
-    icon: '🌤️',
+    icon: 'sun',
     url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
     subdomains: ['a', 'b', 'c', 'd'],
     maxZoom: 19,
@@ -482,6 +484,7 @@ window.ReactNativeWebView.postMessage('READY');
 export default function MapScreen() {
   const navigation = useNavigation();
   const route      = useRoute ? useRoute() : { params: {} };
+  const { t }      = useTranslation();
   const pickMode   = route?.params?.pickMode === true; // mode sélection zone
 
   // ── Radio Garden : snap vers une zone depuis LocalScreen ──────────────────
@@ -499,7 +502,7 @@ export default function MapScreen() {
   const [menuOpen,  setMenuOpen]  = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [modeView,  setModeView]  = useState('local'); // 'local' | 'duo'
-  const [mapStyle,  setMapStyle]  = useState('relief');
+  const [mapStyle,  setMapStyle]  = useState('satellite');
   const [pickedCenter, setPickedCenter] = useState(null);
 
   const [refreshingDots, setRefreshingDots] = useState(false);
@@ -517,6 +520,8 @@ export default function MapScreen() {
   const [showLocalePicker, setShowLocalePicker] = useState(false);
   const [detectedZone, setDetectedZone] = useState(''); // gouvernorat détecté par position
   const [zoneCounts,   setZoneCounts]   = useState({ local: 0, duo: 0 });
+  const [zoneDots,     setZoneDots]     = useState([]); // tous les points verts chargés
+  const snapTimer = useRef(null);
 
   const delegations = selectedGov ? [...new Set((TUNISIA_DATA[selectedGov] || []).map(e => e.delegation))].sort() : [];
   const locales = selectedGov && selectedDeleg ? (TUNISIA_DATA[selectedGov] || []).filter(e => e.delegation === selectedDeleg).map(e => e.localite).sort() : [];
@@ -557,6 +562,7 @@ export default function MapScreen() {
       });
 
       setDetectedZone(zone);
+      cityBarZoneRef.current = zone || cityBarZoneRef.current;
       if (zone && zone !== '—') fetchZoneCounts(zone);
     } catch {
       setDetectedZone('—');
@@ -595,6 +601,7 @@ export default function MapScreen() {
         if (coords) dots.push({ name: z.name, lat: coords.lat, lng: coords.lng, local: z.local, duo: z.duo });
       }
 
+      setZoneDots(dots);
       if (webViewRef.current) {
         webViewRef.current.injectJavaScript(`addZoneDots(${JSON.stringify(dots)}); true;`);
       }
@@ -615,11 +622,41 @@ export default function MapScreen() {
   const RG_RADIUS    = 70; // rayon du grand cercle (moitié du diamètre 140)
   const joystickPan  = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const [cityName,   setCityName]   = useState('Tunis — Ariana');
-  const geocodeTimer = useRef(null);
-  const detectTimer  = useRef(null);
-  const moveInterval = useRef(null);
+  const [isFavorite, setIsFavorite] = useState(false);
+  const geocodeTimer  = useRef(null);
+  const detectTimer   = useRef(null);
+  const moveInterval  = useRef(null);
   const currentCenter = useRef(null);
   const joystickDelta = useRef({ dx: 0, dy: 0, active: false });
+
+  // Ref pour la zone courante (évite la stale closure dans PanResponder)
+  const cityBarZoneRef = useRef(detectedZone || cityName);
+
+  // Animation clignotante de la flèche ↑
+  const arrowAnim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(arrowAnim, { toValue: 0.15, duration: 600, useNativeDriver: true }),
+        Animated.timing(arrowAnim, { toValue: 1,    duration: 600, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, []);
+
+  // PanResponder : glisser vers le haut → ouvrir Local
+  const cityBarPan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, { dy }) => dy < -8,
+      onPanResponderRelease: (_, { dy }) => {
+        if (dy < -40) {
+          navigation.navigate('Local', { zone: cityBarZoneRef.current });
+        }
+      },
+    })
+  ).current;
 
   const reverseGeocode = async (lat, lng) => {
     try {
@@ -637,7 +674,7 @@ export default function MapScreen() {
           data.display_name?.split(',')[0] || null
         );
       });
-      if (city) setCityName(city);
+      if (city) { setCityName(city); cityBarZoneRef.current = city; }
     } catch {}
   };
 
@@ -736,6 +773,13 @@ export default function MapScreen() {
     //    (géré dans l'effect [ready] ci-dessous via mapCenter)
   }, [snapToZone]);
 
+  // ── Vérifier si la zone affichée est en favoris ──────────────────────────────
+  useEffect(() => {
+    const zoneName = snapToZone?.name || detectedZone || cityName;
+    if (!zoneName || !currentUser) { setIsFavorite(false); return; }
+    checkFavorite(zoneName).then(setIsFavorite).catch(() => setIsFavorite(false));
+  }, [snapToZone, detectedZone, cityName, currentUser]);
+
   // 4. Dès que la carte est prête ET qu'on a un snapToZone, on centre + cercle
   useEffect(() => {
     if (!ready || !webViewRef.current || !snapToZone) return;
@@ -763,9 +807,9 @@ export default function MapScreen() {
 
   // Injecter les points verts quand la carte est prête (une seule fois)
   useEffect(() => {
-    if (!ready || mode !== 'map' || pickMode) return;
+    if (!ready || mode !== 'map') return;
     fetchAndInjectZoneDots();
-  }, [ready, mode, pickMode]);
+  }, [ready, mode]);
 
   // Pull-to-refresh : glisser vers le bas depuis le haut de la carte
   const fetchDotsRef = useRef(null);
@@ -936,9 +980,7 @@ export default function MapScreen() {
       {/* Overlay chargement */}
       {!ready && (
         <View style={styles.loadingOverlay}>
-          <Text style={styles.loadingText}>
-            {mode === 'globe' ? '🌍 Chargement...' : '🗺️ Chargement...'}
-          </Text>
+          <Text style={styles.loadingText}>{t('common.loading')}</Text>
         </View>
       )}
 
@@ -954,10 +996,10 @@ export default function MapScreen() {
 
           {/* Champ de recherche */}
           <View style={styles.searchBox}>
-            <Text style={styles.searchIcon}>🔍</Text>
+            <FontAwesome6 name="magnifying-glass" size={13} color="#9CA3AF" />
             <TextInput
               style={styles.searchInput}
-              placeholder="Rechercher un lieu..."
+              placeholder={t('map.searchPlaceholder')}
               placeholderTextColor="rgba(255,255,255,0.45)"
               value={searchQuery}
               onChangeText={searchPlace}
@@ -966,7 +1008,7 @@ export default function MapScreen() {
             />
             {searchQuery.length > 0 && (
               <TouchableOpacity onPress={() => { setSearchQuery(''); setSuggestions([]); }}>
-                <Text style={styles.clearBtn}>✕</Text>
+                <FontAwesome6 name="xmark" size={13} color="#9CA3AF" />
               </TouchableOpacity>
             )}
           </View>
@@ -983,8 +1025,32 @@ export default function MapScreen() {
         {!menuOpen && suggestions.length === 0 && mode === 'map' && (
           <View style={styles.zoneBanner}>
             <Text style={styles.zoneBannerName} numberOfLines={1}>
-              📍  {snapToZone?.name || detectedZone || cityName || '…'}
+              {snapToZone?.name || detectedZone || cityName || '…'}
             </Text>
+            {currentUser && (
+              <TouchableOpacity
+                style={styles.zoneFavBtn}
+                onPress={async () => {
+                  const zoneName = snapToZone?.name || detectedZone || cityName;
+                  if (!zoneName) return;
+                  // Résoudre les coordonnées : snapToZone > getZoneCoords > null
+                  const resolved = snapToZone?.lat
+                    ? { lat: snapToZone.lat, lng: snapToZone.lng }
+                    : (getZoneCoords(zoneName) ?? { lat: null, lng: null });
+                  try {
+                    const next = await toggleFavorite(zoneName, resolved.lat, resolved.lng);
+                    setIsFavorite(next);
+                  } catch (_) {}
+                }}
+              >
+                <FontAwesome6
+                  name="heart"
+                  size={18}
+                  color={isFavorite ? '#FF4C6A' : 'rgba(255,255,255,0.5)'}
+                  solid={isFavorite}
+                />
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
@@ -998,7 +1064,7 @@ export default function MapScreen() {
                 onPress={() => goToPlace(item)}
                 activeOpacity={0.7}
               >
-                <Text style={styles.suggestionIcon}>📍</Text>
+                <FontAwesome6 name="location-dot" size={15} color="#2DBD7E" />
                 <View style={styles.suggestionTexts}>
                   <Text style={styles.suggestionTitle} numberOfLines={1}>
                     {item.display_name.split(',')[0]}
@@ -1024,11 +1090,32 @@ export default function MapScreen() {
             },
           ]}>
 
+            {/* ── Carte pays Tunisia ── */}
+            <TouchableOpacity
+              style={styles.countryCard}
+              activeOpacity={0.8}
+              onPress={() => { setMenuOpen(false); navigation.navigate('Duo', { zone: detectedZone || cityName || '' }); }}
+            >
+              <View style={styles.countryBadge}>
+                <Text style={styles.countryCode}>TN</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.countryName}>Tunisia</Text>
+                <Text style={styles.countryMode}>{t('map.international')}</Text>
+                {(detectedZone && detectedZone !== '—') ? (
+                  <Text style={styles.countryZone} numberOfLines={1}>📍 {detectedZone}</Text>
+                ) : null}
+              </View>
+              <FontAwesome6 name="chevron-right" size={12} color="#2DBD7E" />
+            </TouchableOpacity>
+
+            <View style={styles.menuSep} />
+
             {/* ── Profil utilisateur connecté ── */}
             {currentUser ? (
               <>
                 <View style={styles.menuUserRow}>
-                  <Text style={styles.menuUserAvatar}>👤</Text>
+                  <FontAwesome6 name="circle-user" size={32} color="#9CA3AF" />
                   <View>
                     <Text style={styles.menuUserName}>
                       {currentUser.prenom || ''} {currentUser.nom || ''}
@@ -1044,7 +1131,7 @@ export default function MapScreen() {
 
             {/* ── Sélecteur de style de carte ── */}
             <View style={styles.menuStyleSection}>
-              <Text style={styles.menuStyleTitle}>🗾 Style de carte</Text>
+              <Text style={styles.menuStyleTitle}>{t('map.mapStyle')}</Text>
               <View style={styles.menuStyleGrid}>
                 {MAP_STYLES.map(s => {
                   const active = mapStyle === s.key;
@@ -1055,7 +1142,7 @@ export default function MapScreen() {
                       onPress={() => { setMapStyle(s.key); setReady(false); }}
                       activeOpacity={0.75}
                     >
-                      <Text style={styles.menuStyleIcon}>{s.icon}</Text>
+                      <FontAwesome6 name={s.icon} size={13} color={active ? '#FFFFFF' : '#6B7280'} />
                       <Text style={[styles.menuStyleLabel, active && styles.menuStyleLabelActive]}>
                         {s.label}
                       </Text>
@@ -1067,13 +1154,27 @@ export default function MapScreen() {
 
             <View style={styles.menuSep} />
 
+            {currentUser && (
+              <>
+                <TouchableOpacity
+                  style={styles.menuRow}
+                  onPress={() => { setMenuOpen(false); navigation.navigate('Favorites'); }}
+                  activeOpacity={0.8}
+                >
+                  <FontAwesome6 name="heart" size={18} color="#FF4C6A" solid />
+                  <Text style={styles.menuRowText}>{t('map.myFavorites')}</Text>
+                </TouchableOpacity>
+                <View style={styles.menuSep} />
+              </>
+            )}
+
             <TouchableOpacity
               style={styles.menuRow}
               onPress={() => setMenuOpen(false)}
               activeOpacity={0.8}
             >
-              <Text style={styles.menuRowIcon}>🌐</Text>
-              <Text style={styles.menuRowText}>Langue</Text>
+              <FontAwesome6 name="globe" size={18} color="#6B7280" />
+              <Text style={styles.menuRowText}>{t('map.language')}</Text>
             </TouchableOpacity>
 
             <View style={styles.menuSep} />
@@ -1088,8 +1189,8 @@ export default function MapScreen() {
                 }}
                 activeOpacity={0.8}
               >
-                <Text style={styles.menuRowIcon}>🚪</Text>
-                <Text style={[styles.menuRowText, { color: '#FF3B30' }]}>Déconnexion</Text>
+                <FontAwesome6 name="right-from-bracket" size={18} color="#FF3B30" />
+                <Text style={[styles.menuRowText, { color: '#FF3B30' }]}>{t('map.disconnect')}</Text>
               </TouchableOpacity>
             ) : (
               <TouchableOpacity
@@ -1098,7 +1199,7 @@ export default function MapScreen() {
                 activeOpacity={0.8}
               >
                 <Text style={styles.menuRowIcon}>🔐</Text>
-                <Text style={styles.menuRowText}>Connexion / Inscription</Text>
+                <Text style={styles.menuRowText}>{t('map.loginRegister')}</Text>
               </TouchableOpacity>
             )}
 
@@ -1106,7 +1207,7 @@ export default function MapScreen() {
 
             <TouchableOpacity style={styles.menuRow} onPress={() => setMenuOpen(false)}>
               <Text style={styles.menuRowIcon}>ℹ️</Text>
-              <Text style={styles.menuRowText}>À propos de ByMap</Text>
+              <Text style={styles.menuRowText}>{t('map.about')}</Text>
             </TouchableOpacity>
           </Animated.View>
         )}
@@ -1131,19 +1232,6 @@ export default function MapScreen() {
             <View style={styles.centerCircle} />
             {/* Point central */}
             <View style={styles.centerDot} />
-            {/* Label zone 
-            <View style={styles.centerZoneLabelWrap}>
-              <Text style={styles.centerZoneLabelText} numberOfLines={1}>
-                {detectedZone || cityName || '…'}
-              </Text>
-              {(zoneCounts.local > 0 || zoneCounts.duo > 0) && (
-                <Text style={styles.centerZoneCountsText}>
-                  <Text style={{ color: '#34C759' }}>{zoneCounts.local} local</Text>
-                  {'  ·  '}
-                  <Text style={{ color: '#5DB8FF' }}>{zoneCounts.duo} duo</Text>
-                </Text>
-              )}
-            </View>*/}
           </TouchableOpacity>
         </View>
       )}
@@ -1165,12 +1253,61 @@ export default function MapScreen() {
           {/* Bandeau haut */}
           <View style={pickStyles.topBanner}>
             <TouchableOpacity style={pickStyles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
-              <Text style={pickStyles.backText}>← Retour</Text>
+              <FontAwesome6 name="arrow-left" size={13} color="#ffffff" style={{ marginRight: 6 }} />
+              <Text style={pickStyles.backText}>Retour</Text>
             </TouchableOpacity>
-            <Text style={pickStyles.hint}>Centrez le cercle sur la zone à indexer</Text>
+            <Text style={pickStyles.hint}>{t('map.pickModeHint')}</Text>
           </View>
 
 
+        </>
+      )}
+
+      {/* ── Barre ville + compteurs (au-dessus de la tab bar) ── */}
+      {!pickMode && mode === 'map' && (
+        <>
+          {/* Flèche clignotante — cliquable, au-dessus de la barre */}
+          <TouchableOpacity
+            style={styles.cityBarSwipeHint}
+            onPress={() => navigation.navigate('Local', { zone: cityBarZoneRef.current })}
+            activeOpacity={0.7}
+          >
+            <Animated.View style={{ opacity: arrowAnim , top: -55 }}>
+              <FontAwesome6 name="angles-up" size={20} color="#2DBD7E" />
+            </Animated.View>
+          </TouchableOpacity>
+
+          {/* Barre ville + compteurs — cliquable */}
+          <TouchableOpacity
+            style={styles.cityBar}
+            onPress={() => navigation.navigate('Local', { zone: cityBarZoneRef.current })}
+            activeOpacity={0.8}
+            {...cityBarPan.panHandlers}
+          >
+            <View style={styles.cityBarRow}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, flex: 1 }}>
+                <FontAwesome6 name="location-dot" size={12} color="#2DBD7E" />
+                <Text style={styles.cityBarName} numberOfLines={1}>
+                  {snapToZone?.name || detectedZone || cityName || '…'}
+                </Text>
+              </View>
+              <View style={styles.cityBarCounts}>
+                <View style={styles.cityBarChip}>
+                  <View style={[styles.cityBarPill, { backgroundColor: 'rgba(45,189,126,0.12)' }]}>
+                    <Text style={[styles.cityBarNum, { color: '#2DBD7E' }]}>{zoneCounts.local}</Text>
+                    <Text style={[styles.cityBarLabel, { color: '#2DBD7E' }]}>{t('common.local')}</Text>
+                  </View>
+                </View>
+                <View style={styles.cityBarDivider} />
+                <View style={styles.cityBarChip}>
+                  <View style={[styles.cityBarPill, { backgroundColor: 'rgba(59,126,246,0.10)' }]}>
+                    <Text style={[styles.cityBarNum, { color: '#3B7EF6' }]}>{zoneCounts.duo}</Text>
+                    <Text style={[styles.cityBarLabel, { color: '#3B7EF6' }]}>{t('common.duo')}</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+          </TouchableOpacity>
         </>
       )}
 
@@ -1184,9 +1321,9 @@ export default function MapScreen() {
             {/* Globe */}
             <TouchableOpacity style={styles.tabItem} activeOpacity={0.8}>
               <View style={styles.tabIconBoxActive}>
-                <Text style={styles.tabIcon}>🌍</Text>
+                <FontAwesome6 name="globe" size={20} color="#2DBD7E" />
               </View>
-              <Text style={styles.tabLabelActive}>Globe</Text>
+              <Text style={styles.tabLabelActive}>{t('common.globe')}</Text>
             </TouchableOpacity>
 
             {/* Logo centré + badge */}
@@ -1195,7 +1332,9 @@ export default function MapScreen() {
               activeOpacity={0.85}
               onPress={() => navigation.navigate('Local', { zone: detectedZone || cityName })}
             >
-              <Image source={LOGO} style={styles.tabLogoImg} resizeMode="contain" />
+              <View style={styles.tabLogoCircle}>
+                <Image source={LOGO} style={styles.tabLogoImg} resizeMode="contain" />
+              </View>
               {(zoneCounts.local + zoneCounts.duo) > 0 && (
                 <View style={styles.tabBadge}>
                   <Text style={styles.tabBadgeText}>
@@ -1212,9 +1351,9 @@ export default function MapScreen() {
               onPress={() => navigation.navigate(currentUser ? 'Profile' : 'Login')}
             >
               <View style={styles.tabIconBox}>
-                <Text style={styles.tabIcon}>👤</Text>
+                <FontAwesome6 name="user" size={20} color="#9CA3AF" />
               </View>
-              <Text style={styles.tabLabel}>Profil</Text>
+              <Text style={styles.tabLabel}>{t('common.profile')}</Text>
             </TouchableOpacity>
 
           </View>
@@ -1272,45 +1411,45 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(10,10,20,0.72)',
+    backgroundColor: '#FFFFFF',
     borderRadius: 13,
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 8,
     borderWidth: 1,
-    borderColor: D.glassBorder,
+    borderColor: '#E5E7EB',
     elevation: 4,
-    ...shadow.soft,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08, shadowRadius: 8,
   },
   searchIcon: { fontSize: 13 },
   searchInput: {
     flex: 1,
-    color: D.white,
+    color: '#1A1A2E',
     fontSize: 14,
     padding: 0,
     margin: 0,
   },
   clearBtn: {
-    color: D.textDim,
+    color: '#9CA3AF',
     fontSize: 13,
     paddingHorizontal: 2,
   },
   menuBtn: {
     width: 42,
     height: 42,
-    backgroundColor: 'rgba(10,10,20,0.72)',
+    backgroundColor: '#2DBD7E',
     borderRadius: 13,
     justifyContent: 'center',
     alignItems: 'center',
     gap: 5,
-    borderWidth: 1,
-    borderColor: D.glassBorder,
-    ...shadow.soft,
+    shadowColor: '#2DBD7E', shadowOpacity: 0.4,
+    shadowOffset: { width: 0, height: 3 }, shadowRadius: 8, elevation: 6,
   },
   menuLine: {
     width: 20,
     height: 2,
-    backgroundColor: D.white,
+    backgroundColor: '#FFFFFF',
     borderRadius: 2,
   },
 
@@ -1324,6 +1463,12 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     borderWidth: 1,
     borderColor: D.glassBorder,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  zoneFavBtn: {
+    padding: 2,
   },
   zoneBannerName: {
     color: D.white,
@@ -1332,18 +1477,18 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     textAlign: 'center',
   },
-
   // ── Suggestions ─────────────────────────────────────────────────────────
   suggestionsBox: {
     marginHorizontal: 12,
     marginTop: 6,
-    backgroundColor: 'rgba(10,10,22,0.97)',
+    backgroundColor: '#FFFFFF',
     borderRadius: 14,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: D.glassBorder,
+    borderColor: '#E5E7EB',
     elevation: 8,
-    ...shadow.soft,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08, shadowRadius: 12,
   },
   suggestionRow: {
     flexDirection: 'row',
@@ -1354,24 +1499,25 @@ const styles = StyleSheet.create({
   },
   suggestionBorder: {
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.07)',
+    borderBottomColor: '#F3F4F6',
   },
   suggestionIcon: { fontSize: 15 },
   suggestionTexts: { flex: 1 },
-  suggestionTitle: { color: D.white, fontSize: 14, fontWeight: '600' },
-  suggestionSub: { color: D.textFaint, fontSize: 11, marginTop: 2 },
+  suggestionTitle: { color: '#1A1A2E', fontSize: 14, fontWeight: '600' },
+  suggestionSub: { color: '#9CA3AF', fontSize: 11, marginTop: 2 },
 
   // ── Menu déroulant ───────────────────────────────────────────────────────
   menuDropdown: {
     marginHorizontal: 12,
     marginTop: 6,
-    backgroundColor: 'rgba(10,10,22,0.97)',
+    backgroundColor: '#FFFFFF',
     borderRadius: 14,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: D.glassBorder,
+    borderColor: '#E5E7EB',
     elevation: 8,
-    ...shadow.soft,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08, shadowRadius: 12,
   },
   menuRow: {
     flexDirection: 'row',
@@ -1381,7 +1527,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   menuRowIcon: { fontSize: 18 },
-  menuRowText: { color: D.white, fontSize: 15, fontWeight: '500' },
+  menuRowText: { color: '#1A1A2E', fontSize: 15, fontWeight: '500' },
   menuUserRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1391,20 +1537,51 @@ const styles = StyleSheet.create({
   },
   menuUserAvatar: { fontSize: 28 },
   menuUserName: {
-    color: D.white,
+    color: '#1A1A2E',
     fontSize: 15,
     fontWeight: '700',
   },
   menuUserEmail: {
-    color: D.textFaint,
+    color: '#9CA3AF',
     fontSize: 12,
     marginTop: 2,
     maxWidth: 180,
   },
   menuSep: {
     height: 1,
-    backgroundColor: 'rgba(255,255,255,0.07)',
+    backgroundColor: '#F3F4F6',
     marginHorizontal: 14,
+  },
+
+  // ── Carte pays Tunisia ───────────────────────────────────────────────────
+  countryCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 12,
+    backgroundColor: 'rgba(45,189,126,0.06)',
+  },
+  countryBadge: {
+    width: 42, height: 42, borderRadius: 10,
+    borderWidth: 1.5, borderColor: '#2DBD7E',
+    backgroundColor: 'rgba(45,189,126,0.10)',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  countryCode: {
+    fontSize: 15, fontWeight: '900',
+    color: '#2DBD7E', letterSpacing: 0.5,
+  },
+  countryName: {
+    fontSize: 14, fontWeight: '700', color: '#1A1A2E',
+  },
+  countryMode: {
+    fontSize: 11, fontWeight: '600',
+    color: '#3B7EF6', marginTop: 2,
+  },
+  countryZone: {
+    fontSize: 11, fontWeight: '500',
+    color: '#2DBD7E', marginTop: 3,
   },
 
   // ── Erreur ───────────────────────────────────────────────────────────────
@@ -1572,8 +1749,8 @@ const styles = StyleSheet.create({
   },
   centerDot: {
     position: 'absolute',
-    width: 8,
-    height: 8,
+    width: 4,
+    height: 4,
     borderRadius: 4,
     backgroundColor: '#ffffff',
     shadowColor: '#000',
@@ -1660,57 +1837,140 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
 
-  // ── Bottom Tab Bar ────────────────────────────────────────────────────────
-  tabBar: {
+  // ── Barre ville + compteurs au-dessus de la tab bar ─────────────────────
+  cityBar: {
     position: 'absolute',
-    bottom: 0, left: 0, right: 0,
-    backgroundColor: 'rgba(10,22,40,0.96)',
-    borderTopWidth: 1,
-    borderTopColor: D.glassBorder,
-    paddingBottom: 10,
-    paddingTop: 8,
+    bottom: 130,
+    left: 5,
+    right: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 6,
   },
-  tabRow: {
+  cityBarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+  },
+  cityBarName: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1A1A2E',
+    marginRight: 10,
+  },
+  cityBarCounts: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  cityBarChip: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  tabItem:          { flex: 1, alignItems: 'center', gap: 3 },
-  tabIconBox:       { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center', backgroundColor: 'transparent' },
-  tabIconBoxActive: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center', backgroundColor: D.blueGlow },
-  tabIcon:          { fontSize: 18 },
-  tabLabel:         { fontSize: 11, color: D.textFaint, fontWeight: '500' },
-  tabLabelActive:   { fontSize: 11, color: D.blue, fontWeight: '700' },
+  cityBarPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  cityBarNum: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  cityBarLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  cityBarDivider: {
+    width: 1,
+    height: 18,
+    backgroundColor: '#E5E7EB',
+  },
+  cityBarSwipeHint: {
+    position: 'absolute',
+    bottom: 127,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
-  // Logo central + badge notification
+  // ── Bottom Tab Bar (même style que LocalScreen) ──────────────────────────
+  tabBar: {
+    position: 'absolute',
+    bottom: 40, left: 0, right: 0,
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1, borderTopColor: '#F0F0F0',
+    paddingBottom: 14, paddingTop: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.06, shadowRadius: 8, elevation: 10,
+  },
+  tabRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  tabItem:          { flex: 1, alignItems: 'center', gap: 4 },
+  tabIconBox: {
+    width: 40, height: 40, borderRadius: 14,
+    justifyContent: 'center', alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  tabIconBoxActive: {
+    width: 40, height: 40, borderRadius: 14,
+    justifyContent: 'center', alignItems: 'center',
+    backgroundColor: 'rgba(45,189,126,0.12)',
+  },
+  tabIcon:        { fontSize: 20 },
+  tabLabel:       { fontSize: 11, color: '#9CA3AF', fontWeight: '500' },
+  tabLabelActive: { fontSize: 11, color: '#2DBD7E', fontWeight: '700' },
+
+  // Logo central + badge
   tabLogoWrap: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  tabLogoCircle: {
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: '#2DBD7E',
+    justifyContent: 'center', alignItems: 'center',
+    shadowColor: '#2DBD7E',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4, shadowRadius: 10, elevation: 8,
+  },
   tabLogoImg: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
+    width: 32, height: 32, borderRadius: 16,
   },
   tabBadge: {
     position: 'absolute',
-    top: -4,
-    right: '22%',
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: D.red,
-    justifyContent: 'center',
-    alignItems: 'center',
+    top: -4, right: '22%',
+    minWidth: 18, height: 18, borderRadius: 9,
+    backgroundColor: '#EF4444',
+    justifyContent: 'center', alignItems: 'center',
     paddingHorizontal: 4,
-    borderWidth: 1.5,
-    borderColor: D.navy,
+    borderWidth: 1.5, borderColor: '#FFFFFF',
   },
   tabBadgeText: {
-    color: '#ffffff',
-    fontSize: 10,
-    fontWeight: '800',
-    lineHeight: 12,
+    color: '#ffffff', fontSize: 10,
+    fontWeight: '800', lineHeight: 12,
   },
 });
 // ─── Styles mode sélection zone ───────────────────────────────────────────────

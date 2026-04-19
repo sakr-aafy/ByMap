@@ -1,5 +1,6 @@
 // src/screens/LocalScreen.js
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { FontAwesome6 } from '@expo/vector-icons';
 import {
   StyleSheet,
   View,
@@ -7,7 +8,6 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
-  SafeAreaView,
   FlatList,
   Dimensions,
   Animated,
@@ -16,13 +16,14 @@ import {
   Image,
   RefreshControl,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getCurrentUser, logout as apiLogout } from '../utils/api';
+import { getCurrentUser, logout as apiLogout, checkFavorite, toggleFavorite } from '../utils/api';
+import { useTranslation } from 'react-i18next';
 import { environment } from '../environments/environment.prod';
-import { D, G, shadow, DarkBackground, GlassView, CS } from '../theme/index';
 const API_URL = environment.apiUrl;
 const SERVER_BASE = API_URL.replace('/api', '');
 const { width } = Dimensions.get('window');
@@ -42,52 +43,85 @@ const timeAgo = (dateStr) => {
   return `${Math.floor(diff / 86400)}j`;
 };
 
-// ── Couleurs — alias vers le Design System ByMap ──────────────────────────────
+// ── Couleurs — thème clair mint ───────────────────────────────────────────────
 const C = {
-  local:       D.green,
-  localGlow:   D.greenGlow,
-  duo:         D.blue,
-  duoGlow:     D.blueGlow,
-  navy:        D.navy,
-  navyMid:     D.navyMid,
-  navyLight:   D.navyLight,
-  glass:       D.glass,
-  glassMid:    D.glassMid,
-  glassBorder: D.glassBorder,
-  white:       D.white,
-  textDim:     D.textDim,
-  textFaint:   D.textFaint,
-  red:         D.red,
+  local:       '#2DBD7E',
+  localGlow:   'rgba(45,189,126,0.12)',
+  duo:         '#3B7EF6',
+  duoGlow:     'rgba(59,126,246,0.12)',
+  navy:        '#FFFFFF',
+  navyMid:     '#F8FAFB',
+  navyLight:   '#2DBD7E',
+  glass:       '#FFFFFF',
+  glassMid:    '#E8F5EE',
+  glassBorder: '#E5E7EB',
+  white:       '#1A1A2E',
+  textDim:     '#4B5563',
+  textFaint:   '#9CA3AF',
+  red:         '#EF4444',
 };
 
 // ── Menu items ────────────────────────────────────────────────────────────────
 const MENU_ITEMS = [
-  { key: 'home',      label: 'Accueil',       icon: '🏠' },
-  { key: 'map',       label: 'Carte',          icon: '🗺️' },
-  { key: 'favorites', label: 'Mes favoris',    icon: '❤️' },
-  { key: 'myads',     label: 'Mes annonces',   icon: '📋' },
-  { key: 'settings',  label: 'Paramètres',     icon: '⚙️' },
-  { key: 'help',      label: 'Aide & Support', icon: '💬' },
-  { key: 'logout',    label: 'Déconnexion',    icon: '🚪', danger: true },
+  { key: 'home',      tKey: 'common.home',        icon: 'house' },
+  { key: 'map',       tKey: 'profile.tabMap',     icon: 'map' },
+  { key: 'favorites', tKey: 'map.myFavorites',    icon: 'heart' },
+  { key: 'myads',     tKey: 'profile.myAds',      icon: 'clipboard-list' },
+  { key: 'settings',  tKey: 'profile.settings',   icon: 'gear' },
+  { key: 'help',      tKey: 'profile.helpSupport', icon: 'circle-question' },
+  { key: 'logout',    tKey: 'profile.logout',     icon: 'right-from-bracket', danger: true },
 ];
 
 // ── Bottom Tab Bar items ───────────────────────────────────────────────────────
 const TAB_ITEMS = [
-  { key: 'globe',    label: 'Globe',    icon: '🌍',  authRequired: false },
-  { key: 'messages', label: 'Messages', icon: '💬',  authRequired: true  },
-  { key: 'profile',  label: 'Profil',   icon: '👤',  authRequired: true  },
+  { key: 'globe',    tKey: 'common.globe',    icon: 'globe',   authRequired: false },
+  { key: 'messages', tKey: 'common.messages', icon: 'message', authRequired: true  },
+  { key: 'profile',  tKey: 'common.profile',  icon: 'user',    authRequired: true  },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Composant PubCard — carte LOCAL (vert) ou DUO (bleu)
 // ─────────────────────────────────────────────────────────────────────────────
-const PubCard = ({ item, onPress }) => {
+const PubCard = ({ item, onPress, onContact, currentUser }) => {
+  const { t }      = useTranslation();
   const scaleAnim  = useRef(new Animated.Value(1)).current;
+  const heartScale = useRef(new Animated.Value(1)).current;
   const onPressIn  = () => Animated.spring(scaleAnim, { toValue: 0.97, useNativeDriver: true, tension: 200 }).start();
   const onPressOut = () => Animated.spring(scaleAnim, { toValue: 1,    useNativeDriver: true, tension: 200 }).start();
 
   const [imgError,   setImgError]   = useState(false);
   const [imgLoading, setImgLoading] = useState(true);
+  const [liked,      setLiked]      = useState(false);
+  const [nbLikes,    setNbLikes]    = useState(item.nbLikes ?? item.likes?.length ?? 0);
+  const [vues,       setVues]       = useState(item.vues ?? 0);
+  const [likeLoading, setLikeLoading] = useState(false);
+
+  const handleLike = async () => {
+    if (likeLoading) return;
+    if (!currentUser) { onContact(); return; } // redirige vers Login
+    setLikeLoading(true);
+    try {
+      const token = await AsyncStorage.getItem('accessToken');
+      const res   = await fetch(`${API_URL}/publications/${item._id}/like`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setLiked(data.liked);
+        setNbLikes(data.nbLikes);
+        Animated.sequence([
+          Animated.spring(heartScale, { toValue: 1.5, useNativeDriver: true, tension: 300, friction: 4 }),
+          Animated.spring(heartScale, { toValue: 1,   useNativeDriver: true, tension: 200, friction: 6 }),
+        ]).start();
+      }
+    } catch {}
+    setLikeLoading(false);
+  };
+
+  const handleCardPress = () => {
+    setVues(v => v + 1);
+    onPress();
+  };
 
   const isLocal      = item.mode === 'local';
   const accent       = isLocal ? C.local : C.duo;
@@ -104,7 +138,7 @@ const PubCard = ({ item, onPress }) => {
 
   return (
     <Animated.View style={[styles.card, { transform: [{ scale: scaleAnim }] }]}>
-      <TouchableOpacity activeOpacity={1} onPress={onPress} onPressIn={onPressIn} onPressOut={onPressOut}>
+      <TouchableOpacity activeOpacity={1} onPress={handleCardPress} onPressIn={onPressIn} onPressOut={onPressOut}>
 
         {/* Barre d'accent latérale */}
         <View style={[styles.cardAccentBar, { backgroundColor: accent }]} />
@@ -120,13 +154,18 @@ const PubCard = ({ item, onPress }) => {
           <View style={{ flex: 1 }}>
             <Text style={styles.cardAuthorName} numberOfLines={1}>{authorName}</Text>
             <View style={styles.cardMetaRow}>
-              {locLine ? <Text style={styles.cardLocation} numberOfLines={1}>📍 {locLine}</Text> : null}
+              {locLine ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, flex: 1 }}>
+                  <FontAwesome6 name="location-dot" size={13} color="#9CA3AF" />
+                  <Text style={styles.cardLocation} numberOfLines={1}>{locLine}</Text>
+                </View>
+              ) : null}
               <Text style={styles.cardTime}>{timeAgo(item.createdAt)}</Text>
             </View>
           </View>
           <View style={[styles.modeBadge, { backgroundColor: accentGlow, borderColor: accent }]}>
             <View style={[styles.modeDot, { backgroundColor: accent }]} />
-            <Text style={[styles.modeText, { color: accent }]}>{isLocal ? 'LOCAL' : 'DUO'}</Text>
+            <Text style={[styles.modeText, { color: accent }]}>{isLocal ? t('common.local') : t('common.duo')}</Text>
           </View>
         </View>
 
@@ -154,13 +193,50 @@ const PubCard = ({ item, onPress }) => {
           </View>
         ) : null}
 
-        {/* ── Footer : likes + vues ── */}
+        {/* ── Footer : likes + vues + contact ── */}
         <View style={styles.cardFooter}>
-          <Text style={styles.cardMetaText}>❤️ {item.nbLikes ?? item.likes?.length ?? 0}</Text>
-          <Text style={styles.cardMetaText}>👁 {item.vues ?? 0}</Text>
+
+          {/* Jadore */}
+          <TouchableOpacity
+            style={styles.cardMetaStat}
+            onPress={handleLike}
+            activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Animated.View style={{ transform: [{ scale: heartScale }] }}>
+              <FontAwesome6
+                name="heart"
+                size={22}
+                color={liked ? C.red : '#9CA3AF'}
+                solid={liked}
+              />
+            </Animated.View>
+            <Text style={[styles.cardMetaText, liked && { color: C.red, fontWeight: '700' }]}>
+              {nbLikes}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Vues */}
+          <View style={styles.cardMetaStat}>
+            <FontAwesome6 name="eye" size={20} color="#9CA3AF" />
+            <Text style={styles.cardMetaText}>{vues}</Text>
+          </View>
+
           {item.medias?.length > 1 && (
-            <Text style={styles.cardMetaText}>🖼 {item.medias.length}</Text>
+            <View style={styles.cardMetaStat}>
+              <FontAwesome6 name="images" size={18} color="#9CA3AF" />
+              <Text style={styles.cardMetaText}>{item.medias.length}</Text>
+            </View>
           )}
+
+          <View style={{ flex: 1 }} />
+          <TouchableOpacity
+            style={[styles.contactBtn, { borderColor: accent, backgroundColor: accentGlow }]}
+            onPress={onContact} activeOpacity={0.75}
+          >
+            <FontAwesome6 name="comment" size={17} color={accent} style={{ marginRight: 5 }} />
+            <Text style={[styles.contactBtnText, { color: accent }]}>{t('local.contact')}</Text>
+          </TouchableOpacity>
         </View>
 
       </TouchableOpacity>
@@ -174,6 +250,7 @@ const PubCard = ({ item, onPress }) => {
 export default function LocalScreen() {
   const navigation = useNavigation();
   const route      = useRoute();
+  const { t }      = useTranslation();
   const zoneName   = route.params?.zone || '';
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -187,7 +264,8 @@ export default function LocalScreen() {
   const [page,        setPage]        = useState(1);
   const [hasMore,     setHasMore]     = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [hasNewPost, setHasNewPost] = useState(false);
+  const [hasNewPost,  setHasNewPost]  = useState(false);
+  const [isFavorite,  setIsFavorite]  = useState(false);
   const prevPubsCount = useRef(0);
 
   // ── Animation FAB ──────────────────────────────────────────────────────────
@@ -253,8 +331,15 @@ export default function LocalScreen() {
   // ── Charger l'utilisateur connecté ────────────────────────────────────────
   useFocusEffect(
     useCallback(() => {
-      getCurrentUser().then(setCurrentUser);
-    }, [])
+      getCurrentUser().then(u => {
+        setCurrentUser(u);
+        if (u && zoneName) {
+          checkFavorite(zoneName).then(setIsFavorite).catch(() => setIsFavorite(false));
+        } else {
+          setIsFavorite(false);
+        }
+      });
+    }, [zoneName])
   );
 
   // ── Fetch publications depuis le backend ───────────────────────────────────
@@ -317,8 +402,9 @@ export default function LocalScreen() {
   // ── Navigation ────────────────────────────────────────────────────────────
   const handleMenuItem = async (key) => {
     closeMenu();
-    if (key === 'map')    { navigation.navigate('Map'); return; }
-    if (key === 'logout') { await apiLogout(); setCurrentUser(null); return; }
+    if (key === 'map')       { navigation.navigate('Map');       return; }
+    if (key === 'favorites') { navigation.navigate('Favorites'); return; }
+    if (key === 'logout')    { await apiLogout(); setCurrentUser(null); return; }
   };
 
   const handleTab = (key) => {
@@ -335,7 +421,7 @@ export default function LocalScreen() {
 
   const handleFabPress = () => {
     if (!currentUser) navigation.navigate('Login');
-    else navigation.navigate('AjoutePub');
+    else navigation.navigate('AjoutePub', { mode: modeFilter !== 'all' ? modeFilter : undefined });
   };
 
   // ── Compteurs local / duo ─────────────────────────────────────────────────
@@ -358,29 +444,29 @@ export default function LocalScreen() {
   // Render
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <DarkBackground style={{ flex: 1 }}>
-      <StatusBar style="light" />
+    <View style={{ flex: 1, backgroundColor: '#F2F5F3' }}>
+      <StatusBar style="dark" />
 
       <SafeAreaView style={styles.safe}>
 
         {/* ── Header ── */}
         <View style={styles.header}>
           <TouchableOpacity style={styles.backBtn} onPress={() => navigation.navigate('Map')} activeOpacity={0.7}>
-            <Text style={styles.backIcon}>←</Text>
+            <FontAwesome6 name="arrow-left" size={20} color="#1A1A2E" />
           </TouchableOpacity>
 
           <View style={styles.searchBox}>
-            <Text style={styles.searchIcon}>🔍</Text>
+            <FontAwesome6 name="magnifying-glass" size={16} color="#9CA3AF" />
             <TextInput
               style={styles.searchInput}
-              placeholder="Search..."
+              placeholder={t('common.search')}
               placeholderTextColor={C.textFaint}
               value={search}
               onChangeText={setSearch}
             />
             {search.length > 0 && (
               <TouchableOpacity onPress={() => setSearch('')}>
-                <Text style={styles.clearBtn}>✕</Text>
+                <FontAwesome6 name="xmark" size={16} color="#9CA3AF" />
               </TouchableOpacity>
             )}
           </View>
@@ -428,9 +514,31 @@ export default function LocalScreen() {
         {/* ── Nom de la zone ── */}
         <View style={styles.zoneRow}>
           <View style={styles.zoneTitleRow}>
-            <Text style={styles.sectionTitle}>
-              {zoneName ? `📍 ${zoneName}` : 'Toutes les publications'}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+              {zoneName ? <FontAwesome6 name="location-dot" size={18} color={C.local} /> : null}
+              <Text style={[styles.sectionTitle, { flex: 1 }]} numberOfLines={1}>
+                {zoneName || t('local.allPubs')}
+              </Text>
+              {currentUser && zoneName ? (
+                <TouchableOpacity
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  onPress={async () => {
+                    try {
+                      const next = await toggleFavorite(zoneName);
+                      setIsFavorite(next);
+                    } catch (_) {}
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <FontAwesome6
+                    name="heart"
+                    size={18}
+                    color={isFavorite ? '#FF4C6A' : '#D1D5DB'}
+                    solid={isFavorite}
+                  />
+                </TouchableOpacity>
+              ) : null}
+            </View>
             {hasNewPost && <View style={styles.greenDot} />}
           </View>
           {publications.length > 0 && (
@@ -453,7 +561,7 @@ export default function LocalScreen() {
               onPress={() => setModeFilter('all')}
               activeOpacity={0.75}
             >
-              <Text style={{ fontSize: 18 }}>🌐</Text>
+              <FontAwesome6 name="globe" size={20} color="#6B7280" />
             </TouchableOpacity>
             <TouchableOpacity
               style={[
@@ -486,7 +594,7 @@ export default function LocalScreen() {
         {loading ? (
           <View style={styles.loaderBox}>
             <ActivityIndicator size="large" color={C.duo} />
-            <Text style={styles.loaderText}>Chargement des publications…</Text>
+            <Text style={styles.loaderText}>{t('local.loadingPubs')}</Text>
           </View>
         ) : (
           <FlatList
@@ -507,17 +615,22 @@ export default function LocalScreen() {
             renderItem={({ item }) => (
               <PubCard
                 item={item}
+                currentUser={currentUser}
                 onPress={() => navigation.navigate('PublicationDetail', { publication: item })}
+                onContact={() => {
+                  if (!currentUser) navigation.navigate('Login');
+                  else navigation.navigate('Messages', { recipient: item.auteur });
+                }}
               />
             )}
             ListEmptyComponent={
               <View style={styles.emptyBox}>
-                <Text style={styles.emptyIcon}>📭</Text>
-                <Text style={styles.emptyTitle}>Aucune publication</Text>
+                <FontAwesome6 name="inbox" size={64} color="#D1D5DB" />
+                <Text style={styles.emptyTitle}>{t('local.noPubs')}</Text>
                 <Text style={styles.emptyText}>
                   {zoneName
-                    ? `Aucune publication dans la zone « ${zoneName} »`
-                    : 'Soyez le premier à publier !'}
+                    ? t('local.noPubsZone', { zone: zoneName })
+                    : t('local.beFirst')}
                 </Text>
               </View>
             }
@@ -557,12 +670,14 @@ export default function LocalScreen() {
                 activeOpacity={0.8}
               >
                 <View style={[styles.tabIconBox, isActive && !isLocked && styles.tabIconBoxActive]}>
-                  <Text style={[styles.tabIcon, isActive && !isLocked && styles.tabIconActive]}>
-                    {tab.icon}
-                  </Text>
+                  <FontAwesome6
+                    name={tab.icon}
+                    size={24}
+                    color={isActive && !isLocked ? '#2DBD7E' : '#9CA3AF'}
+                  />
                 </View>
                 <Text style={[styles.tabLabel, isActive && !isLocked && styles.tabLabelActive]}>
-                  {tab.label}
+                  {t(tab.tKey)}
                 </Text>
               </TouchableOpacity>
             );
@@ -581,22 +696,29 @@ export default function LocalScreen() {
             <Animated.View style={[styles.menuPanel, { transform: [{ translateX: menuAnim }] }]}>
               <View style={styles.menuHeader}>
                 <View style={styles.menuLogo}>
-                  <Text style={styles.menuLogoText}>📍</Text>
+                  <FontAwesome6 name="location-dot" size={26} color={C.local} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.menuAppName}>ByMap</Text>
-                  <Text style={[styles.menuAppSub, { color: currentUser ? C.local : '#FF6B6B' }]}>
-                    {currentUser ? '✅ Connecté' : '🔒 Non connecté'}
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 }}>
+                    <FontAwesome6
+                      name={currentUser ? 'circle-check' : 'lock'}
+                      size={11}
+                      color={currentUser ? C.local : '#FF6B6B'}
+                    />
+                    <Text style={[styles.menuAppSub, { color: currentUser ? C.local : '#FF6B6B' }]}>
+                      {currentUser ? 'Connecté' : 'Non connecté'}
+                    </Text>
+                  </View>
                 </View>
                 <TouchableOpacity style={styles.menuClose} onPress={closeMenu}>
-                  <Text style={styles.menuCloseIcon}>✕</Text>
+                  <FontAwesome6 name="xmark" size={16} color="#1A1A2E" />
                 </TouchableOpacity>
               </View>
 
               {currentUser ? (
                 <View style={styles.menuUserCard}>
-                  <Text style={styles.menuUserAvatar}>👤</Text>
+                  <FontAwesome6 name="circle-user" size={38} color="#9CA3AF" />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.menuUserName}>{currentUser.prenom || ''} {currentUser.nom || ''}</Text>
                     <Text style={styles.menuUserEmail} numberOfLines={1}>{currentUser.email || currentUser.phone || ''}</Text>
@@ -608,7 +730,7 @@ export default function LocalScreen() {
                   onPress={() => { closeMenu(); navigation.navigate('Login'); }}
                   activeOpacity={0.85}
                 >
-                  <Text style={styles.menuLoginBannerText}>Se connecter / S'inscrire →</Text>
+                  <Text style={styles.menuLoginBannerText}>{t('map.loginRegister')} →</Text>
                 </TouchableOpacity>
               )}
 
@@ -622,9 +744,14 @@ export default function LocalScreen() {
                       onPress={() => handleMenuItem(item.key)}
                       activeOpacity={0.75}
                     >
-                      <Text style={styles.menuItemIcon}>{item.icon}</Text>
+                      <FontAwesome6
+                        name={item.icon}
+                        size={22}
+                        color={item.danger ? '#EF4444' : '#6B7280'}
+                        style={{ width: 28, textAlign: 'center' }}
+                      />
                       <Text style={[styles.menuItemLabel, item.danger && styles.menuItemLabelDanger]}>
-                        {item.label}
+                        {t(item.tKey)}
                       </Text>
                     </TouchableOpacity>
                   );
@@ -636,279 +763,255 @@ export default function LocalScreen() {
         )}
 
       </SafeAreaView>
-    </DarkBackground>
+    </View>
   );
 }
 
-// ── Styles — thème sombre (identique LoginScreen) ─────────────────────────────
+// ── Styles — thème clair mint ─────────────────────────────────────────────────
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: 'transparent' },
-
-  // ── Blobs décoratifs (identiques au LoginScreen)
-  blobTopRight: {
-    position: 'absolute', borderRadius: 999,
-    width: 300, height: 300, top: -80, right: -80,
-    backgroundColor: 'rgba(30,144,255,0.25)',
-  },
-  blobBottomLeft: {
-    position: 'absolute', borderRadius: 999,
-    width: 260, height: 260, bottom: -60, left: -70,
-    backgroundColor: 'rgba(52,199,89,0.22)',
-  },
-  blobCenter: {
-    position: 'absolute', borderRadius: 999,
-    width: 180, height: 180, top: '35%', left: '20%',
-    backgroundColor: 'rgba(120,60,220,0.18)',
-  },
 
   // ── Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingVertical: 10,
-    paddingTop: 38,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.10)',
-    gap: 8,
+    borderBottomColor: '#F0F0F0',
+    gap: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 4,
   },
   backBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.10)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)',
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1, borderColor: '#E5E7EB',
     justifyContent: 'center', alignItems: 'center',
   },
-  backIcon: { fontSize: 18, color: C.white, fontWeight: '600' },
+  backIcon: { fontSize: 18, color: '#1A1A2E', fontWeight: '600' },
   searchBox: {
     flex: 1,
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1, borderColor: '#E5E7EB',
     borderRadius: 22, paddingHorizontal: 12, paddingVertical: 9, gap: 6,
   },
   searchIcon:  { fontSize: 13 },
-  searchInput: { flex: 1, fontSize: 14, color: C.white, padding: 0 },
-  clearBtn:    { color: C.textFaint, fontSize: 13, paddingHorizontal: 2 },
+  searchInput: { flex: 1, fontSize: 14, color: '#1A1A2E', padding: 0 },
+  clearBtn:    { color: '#9CA3AF', fontSize: 13, paddingHorizontal: 2 },
 
-  // Cercles LOCAL/DUO dans le header
-  headerDots:     { flexDirection: 'row', gap: 6, alignItems: 'center' },
-  headerDot:      { width: 18, height: 18, borderRadius: 9 },
-  headerDotDimmed:{ opacity: 0.3 },
+  headerDots:      { flexDirection: 'row', gap: 6, alignItems: 'center' },
+  headerDot:       { width: 18, height: 18, borderRadius: 9 },
+  headerDotDimmed: { opacity: 0.25 },
 
   menuBtn: {
-    width: 36, height: 36, borderRadius: 10,
-    backgroundColor: C.duo,
+    width: 38, height: 38, borderRadius: 12,
+    backgroundColor: '#2DBD7E',
     justifyContent: 'center', alignItems: 'center',
     gap: 4, paddingVertical: 8,
-    shadowColor: C.duo, shadowOpacity: 0.4, shadowRadius: 8,
+    shadowColor: '#2DBD7E', shadowOpacity: 0.35, shadowRadius: 8,
     shadowOffset: { width: 0, height: 3 }, elevation: 6,
   },
-  menuLine: { width: 20, height: 2, backgroundColor: C.white, borderRadius: 2 },
+  menuLine: { width: 20, height: 2, backgroundColor: '#FFFFFF', borderRadius: 2 },
 
   // ── Zone + filtres
   zoneRow: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1, borderBottomColor: '#F0F0F0',
     paddingHorizontal: 16,
-    paddingTop: 10,
+    paddingTop: 14,
     paddingBottom: 14,
-    gap: 8,
+    gap: 10,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '900',
-    color: C.white,
-    letterSpacing: 0.3,
+    fontSize: 20, fontWeight: '800',
+    color: '#1A1A2E', letterSpacing: -0.3,
   },
   filterRow: { flexDirection: 'row', gap: 8 },
   filterPill: {
-    paddingHorizontal: 18, paddingVertical: 9,
-    borderRadius: 24,
+    paddingHorizontal: 20, paddingVertical: 10,
+    borderRadius: 30,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
+    shadowOpacity: 0.06, shadowRadius: 4, elevation: 2,
   },
   filterText: { fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
 
   // ── Loader
   loaderBox:  { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
-  loaderText: { fontSize: 14, color: C.textDim },
+  loaderText: { fontSize: 14, color: '#6B7280' },
 
   // ── Liste
   listContent: {
-    paddingHorizontal: 14,
-    paddingTop: 12,
-    paddingBottom: 120,
-    gap: 12,
+    paddingHorizontal: 16, paddingTop: 14, paddingBottom: 120, gap: 14,
   },
 
-  // ── Card (glassmorphism)
+  // ── Card blanche
   card: {
-    backgroundColor: 'rgba(255,255,255,0.09)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)',
-    borderRadius: 20,
-    overflow: 'hidden',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1, borderColor: '#F0F0F0',
+    borderRadius: 20, overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 12,
-    elevation: 4,
+    shadowOpacity: 0.07, shadowRadius: 16, elevation: 4,
   },
   cardAccentBar: {
     position: 'absolute', left: 0, top: 0, bottom: 0,
-    width: 3, borderRadius: 2,
+    width: 4, borderRadius: 2,
   },
 
-  // Header : avatar + auteur + temps + badge
   cardHeader: {
-    flexDirection: 'row', alignItems: 'center',
-    gap: 10,
+    flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingLeft: 18, paddingRight: 14, paddingTop: 14, paddingBottom: 10,
   },
   cardAvatar: {
-    width: 42, height: 42, borderRadius: 21,
+    width: 44, height: 44, borderRadius: 22,
     justifyContent: 'center', alignItems: 'center',
   },
-  cardAvatarText: { color: C.white, fontWeight: '800', fontSize: 16 },
-  cardAuthorName: { fontSize: 14, fontWeight: '700', color: C.white },
+  cardAvatarText: { color: '#FFFFFF', fontWeight: '800', fontSize: 17 },
+  cardAuthorName: { fontSize: 15, fontWeight: '700', color: '#1A1A2E' },
   cardMetaRow:    { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
-  cardLocation:   { fontSize: 11, color: C.textDim, flex: 1 },
-  cardTime:       { fontSize: 11, color: C.textFaint, fontWeight: '500' },
+  cardLocation:   { fontSize: 12, color: '#6B7280', flex: 1 },
+  cardTime:       { fontSize: 11, color: '#9CA3AF', fontWeight: '500' },
 
-  // Badge LOCAL / DUO
   modeBadge: {
     flexDirection: 'row', alignItems: 'center',
     borderRadius: 20, borderWidth: 1,
-    paddingHorizontal: 8, paddingVertical: 3,
-    gap: 4,
+    paddingHorizontal: 8, paddingVertical: 4, gap: 4,
   },
   modeDot:  { width: 6, height: 6, borderRadius: 3 },
   modeText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.3 },
 
-  // Description
   cardDesc: {
-    fontSize: 14, color: C.textDim,
+    fontSize: 14, color: '#4B5563',
     lineHeight: 22,
     paddingLeft: 18, paddingRight: 14, paddingBottom: 10,
   },
 
-  // Image
   cardImageWrap: {
-    marginHorizontal: 12, marginBottom: 4,
-    borderRadius: 12, overflow: 'hidden',
-    height: 200,
+    marginHorizontal: 14, marginBottom: 8,
+    borderRadius: 14, overflow: 'hidden', height: 200,
   },
   cardImage: { width: '100%', height: '100%' },
   cardImageLoader: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
     justifyContent: 'center', alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.18)',
+    backgroundColor: 'rgba(0,0,0,0.06)',
   },
   cardImagePlaceholder: {},
   cardImageIcon:        {},
   cardImageHint:        {},
 
-  locLine: { fontSize: 11, color: C.textFaint },
+  locLine: { fontSize: 11, color: '#9CA3AF' },
 
-  // Footer : likes + vues
   cardFooter: {
     flexDirection: 'row', alignItems: 'center',
-    gap: 14, paddingLeft: 18, paddingRight: 14, paddingVertical: 10,
-    borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)',
-    backgroundColor: 'rgba(0,0,0,0.12)',
+    gap: 14, paddingLeft: 18, paddingRight: 14, paddingVertical: 12,
+    borderTopWidth: 1, borderTopColor: '#F3F4F6',
+    backgroundColor: '#FAFAFA',
   },
-  cardAuthor:   { fontSize: 12, color: C.textDim, fontWeight: '500', flex: 1 },
-  cardMeta:     { flexDirection: 'row', gap: 10 },
-  cardMetaText: { fontSize: 12, color: C.textDim, fontWeight: '500' },
+  cardAuthor:    { fontSize: 12, color: '#6B7280', fontWeight: '500', flex: 1 },
+  cardMeta:      { flexDirection: 'row', gap: 10 },
+  cardMetaStat:  { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  cardMetaText:  { fontSize: 12, color: '#6B7280', fontWeight: '500' },
+  contactBtn: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 14, paddingVertical: 6,
+    borderRadius: 20, borderWidth: 1.5,
+    borderColor: '#3B7EF6', backgroundColor: 'rgba(59,126,246,0.08)',
+  },
+  contactBtnText: { fontSize: 12, color: '#3B7EF6', fontWeight: '700' },
 
   // ── Empty
   emptyBox:   { alignItems: 'center', paddingTop: 60, gap: 10 },
   emptyIcon:  { fontSize: 52 },
-  emptyTitle: { fontSize: 18, fontWeight: '800', color: C.white },
-  emptyText:  { fontSize: 14, color: C.textDim, lineHeight: 22, textAlign: 'center', paddingHorizontal: 32 },
+  emptyTitle: { fontSize: 18, fontWeight: '800', color: '#1A1A2E' },
+  emptyText:  { fontSize: 14, color: '#6B7280', lineHeight: 22, textAlign: 'center', paddingHorizontal: 32 },
 
   // ── FAB
   fab: {
-    position: 'absolute', bottom: 88, right: 24,
+    position: 'absolute', bottom: 90, right: 24,
     width: 56, height: 56, borderRadius: 28,
-    shadowColor: '#1a1a2e',
+    shadowColor: '#2DBD7E',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 16,
-    elevation: 12,
+    shadowOpacity: 0.45, shadowRadius: 16, elevation: 12,
   },
   fabInner: {
     width: 56, height: 56, borderRadius: 28,
-    backgroundColor: C.navyLight,
+    backgroundColor: '#2DBD7E',
     justifyContent: 'center', alignItems: 'center',
   },
-  fabIcon: { fontSize: 28, color: C.white, fontWeight: '300', lineHeight: 32 },
+  fabIcon: { fontSize: 28, color: '#FFFFFF', fontWeight: '300', lineHeight: 32 },
 
   // ── Bottom Tab Bar
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(10,22,40,0.92)',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.10)',
-    paddingBottom: 8,
-    paddingTop: 10,
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1, borderTopColor: '#F0F0F0',
+    paddingBottom: 8, paddingTop: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.06, shadowRadius: 8, elevation: 10,
   },
   tabItem:          { flex: 1, alignItems: 'center', gap: 4 },
-  tabIconBox:       { width: 36, height: 36, borderRadius: 12, justifyContent: 'center', alignItems: 'center', backgroundColor: 'transparent' },
-  tabIconBoxActive: { backgroundColor: 'rgba(30,144,255,0.18)' },
-  tabIcon:          { fontSize: 18 },
-  tabIconActive:    { fontSize: 18 },
-  tabLabel:         { fontSize: 11, color: C.textFaint, fontWeight: '500' },
-  tabLabelActive:   { color: C.duo, fontWeight: '700' },
+  tabIconBox:       { width: 40, height: 40, borderRadius: 14, justifyContent: 'center', alignItems: 'center', backgroundColor: 'transparent' },
+  tabIconBoxActive: { backgroundColor: 'rgba(45,189,126,0.12)' },
+  tabIcon:          { fontSize: 20 },
+  tabIconActive:    { fontSize: 20 },
+  tabLabel:         { fontSize: 11, color: '#9CA3AF', fontWeight: '500' },
+  tabLabelActive:   { color: '#2DBD7E', fontWeight: '700' },
 
   // ════ MENU LATÉRAL ════
-  menuOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(10,16,40,0.75)' },
+  menuOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.28)' },
   menuPanel: {
     position: 'absolute', top: 0, bottom: 0, right: 0,
-    width: width * 0.72, backgroundColor: C.navy,
+    width: width * 0.72, backgroundColor: '#FFFFFF',
     shadowColor: '#000', shadowOffset: { width: -4, height: 0 },
-    shadowOpacity: 0.35, shadowRadius: 20, elevation: 20,
+    shadowOpacity: 0.12, shadowRadius: 20, elevation: 20,
   },
   menuHeader: {
     flexDirection: 'row', alignItems: 'center',
     paddingTop: 54, paddingBottom: 20, paddingHorizontal: 20,
-    backgroundColor: C.navyMid,
+    backgroundColor: '#F8FAFB',
+    borderBottomWidth: 1, borderBottomColor: '#F0F0F0',
     gap: 12,
   },
   menuLogo: {
     width: 44, height: 44, borderRadius: 14,
-    backgroundColor: 'rgba(30,144,255,0.15)',
+    backgroundColor: 'rgba(45,189,126,0.15)',
     justifyContent: 'center', alignItems: 'center',
   },
   menuLogoText: { fontSize: 22 },
-  menuAppName:  { fontSize: 17, fontWeight: '800', color: C.white, letterSpacing: -0.3 },
+  menuAppName:  { fontSize: 17, fontWeight: '800', color: '#1A1A2E', letterSpacing: -0.3 },
   menuAppSub:   { fontSize: 12, marginTop: 1 },
   menuClose: {
     marginLeft: 'auto', width: 30, height: 30, borderRadius: 15,
-    backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center',
+    backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center',
   },
-  menuCloseIcon:  { fontSize: 13, color: C.white, fontWeight: '700' },
+  menuCloseIcon:  { fontSize: 13, color: '#1A1A2E', fontWeight: '700' },
   menuUserCard: {
     flexDirection: 'row', alignItems: 'center',
     marginHorizontal: 16, marginTop: 16,
-    backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 14,
+    backgroundColor: '#F8FAFB', borderRadius: 14,
     paddingVertical: 12, paddingHorizontal: 14, gap: 12,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1, borderColor: '#E5E7EB',
   },
   menuUserAvatar: { fontSize: 28 },
-  menuUserName:   { fontSize: 15, fontWeight: '700', color: C.white },
-  menuUserEmail:  { fontSize: 12, color: C.textFaint, marginTop: 2 },
+  menuUserName:   { fontSize: 15, fontWeight: '700', color: '#1A1A2E' },
+  menuUserEmail:  { fontSize: 12, color: '#9CA3AF', marginTop: 2 },
   menuLoginBanner: {
     marginHorizontal: 16, marginTop: 16,
-    backgroundColor: C.duo, borderRadius: 12,
+    backgroundColor: '#2DBD7E', borderRadius: 12,
     paddingVertical: 13, alignItems: 'center',
-    shadowColor: C.duo, shadowOpacity: 0.35, shadowRadius: 10,
+    shadowColor: '#2DBD7E', shadowOpacity: 0.35, shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 }, elevation: 6,
   },
-  menuLoginBannerText: { color: C.white, fontWeight: '700', fontSize: 14 },
+  menuLoginBannerText: { color: '#FFFFFF', fontWeight: '700', fontSize: 14 },
   menuItemsList:  { flex: 1, paddingTop: 12 },
   menuItem: {
     flexDirection: 'row', alignItems: 'center',
@@ -917,22 +1020,22 @@ const styles = StyleSheet.create({
   },
   menuItemDanger:      { marginTop: 8 },
   menuItemIcon:        { fontSize: 22, width: 28, textAlign: 'center' },
-  menuItemLabel:       { fontSize: 15, color: C.white, fontWeight: '600' },
-  menuItemLabelDanger: { color: '#FF6B6B' },
+  menuItemLabel:       { fontSize: 15, color: '#1A1A2E', fontWeight: '600' },
+  menuItemLabelDanger: { color: '#EF4444' },
   menuFooter: {
-    textAlign: 'center', color: C.textFaint,
+    textAlign: 'center', color: '#9CA3AF',
     fontSize: 12, paddingBottom: 32, paddingTop: 12,
   },
 
-  // ── Zone title row (with green dot)
+  // ── Zone title row
   zoneTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   greenDot: {
     width: 10, height: 10, borderRadius: 5,
-    backgroundColor: C.local,
-    shadowColor: C.local, shadowOffset: { width: 0, height: 0 },
+    backgroundColor: '#2DBD7E',
+    shadowColor: '#2DBD7E', shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.9, shadowRadius: 6, elevation: 4,
   },
-  zoneSubtitle: { fontSize: 12, color: C.textDim, fontWeight: '600', marginTop: 1 },
-  zoneSubLocal: { color: C.local, fontWeight: '700' },
-  zoneSubDuo:   { color: C.duo,   fontWeight: '700' },
+  zoneSubtitle: { fontSize: 12, color: '#6B7280', fontWeight: '600', marginTop: 1 },
+  zoneSubLocal: { color: '#2DBD7E', fontWeight: '700' },
+  zoneSubDuo:   { color: '#3B7EF6', fontWeight: '700' },
 });
