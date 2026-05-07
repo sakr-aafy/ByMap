@@ -17,6 +17,7 @@ const messageRoutes     = require('./src/routes/message.routes');
 const favoriteRoutes    = require('./src/routes/favorite.routes');
 const zoneRoutes        = require('./src/routes/zone.routes');
 const localiteRoutes    = require('./src/routes/localite.routes');
+const paysRoutes        = require('./src/routes/pays.routes');
 
 const app        = express();
 const httpServer = http.createServer(app);
@@ -45,6 +46,7 @@ app.use('/api/messages',    messageRoutes);
 app.use('/api/favorites',   favoriteRoutes);
 app.use('/api/zones',       zoneRoutes);
 app.use('/api/localites',   localiteRoutes);
+app.use('/api/pays',        paysRoutes);
 
 // ─── Route de santé ───────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'OK', timestamp: new Date() }));

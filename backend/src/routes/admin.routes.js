@@ -3,6 +3,7 @@ const router        = require('express').Router();
 const ctrl          = require('../controllers/admin.controller');
 const zoneCtrl      = require('../controllers/zone.controller');
 const localiteCtrl  = require('../controllers/localite.controller');
+const paysCtrl      = require('../controllers/pays.controller');
 const { protect, adminOnly } = require('../middleware/auth.middleware');
 
 router.use(protect, adminOnly); // toutes ces routes : JWT + rôle admin
@@ -21,5 +22,8 @@ router.delete('/zones/:id',    zoneCtrl.remove);       // DELETE /api/admin/zone
 
 // ── Localités Tunisia ──────────────────────────────────────────────────────────
 router.post('/localites/import', localiteCtrl.importTunisia); // POST /api/admin/localites/import
+
+// ── Pays (Algeria, France, Germany, Italy, Spain) ─────────────────────────────
+router.post('/pays/import', paysCtrl.importAll); // POST /api/admin/pays/import
 
 module.exports = router;

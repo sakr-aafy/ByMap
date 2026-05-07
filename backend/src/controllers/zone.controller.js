@@ -13,12 +13,12 @@ exports.getAll = async (_req, res) => {
 // POST /api/admin/zones  — admin only
 exports.create = async (req, res) => {
   try {
-    const { name, gouvernorat, ville, description, lat, lng } = req.body;
+    const { name, pays, gouvernorat, ville, description, lat, lng } = req.body;
     if (!name?.trim()) return res.status(400).json({ message: 'Le nom est obligatoire' });
     if (lat == null || lng == null) return res.status(400).json({ message: 'Les coordonnées sont obligatoires' });
 
     const zone = await Zone.create({
-      name: name.trim(), gouvernorat, ville, description,
+      name: name.trim(), pays: pays || '', gouvernorat, ville, description,
       lat: Number(lat), lng: Number(lng),
     });
     res.status(201).json({ zone });
@@ -38,6 +38,7 @@ exports.importBulk = async (req, res) => {
       .filter(z => z.name?.toString().trim() && z.lat != null && z.lng != null)
       .map(z => ({
         name:        z.name.toString().trim(),
+        pays:        z.pays        || '',
         gouvernorat: z.gouvernorat || '',
         ville:       z.ville       || '',
         description: z.description || '',

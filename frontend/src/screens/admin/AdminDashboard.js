@@ -306,8 +306,19 @@ const CascadePicker = ({ visible, title, items, labelKey, subKey, loading, onSel
   );
 };
 
+// Liste statique des pays disponibles (Tunisia gérée séparément)
+const PAYS_LIST = [
+  { code: 'TN', name: 'Tunisie',    flag: '🇹🇳' },
+  { code: 'DZ', name: 'Algérie',    flag: '🇩🇿' },
+  { code: 'FR', name: 'France',     flag: '🇫🇷' },
+  { code: 'DE', name: 'Allemagne',  flag: '🇩🇪' },
+  { code: 'IT', name: 'Italie',     flag: '🇮🇹' },
+  { code: 'ES', name: 'Espagne',    flag: '🇪🇸' },
+];
+
 // ─── Modal Ajouter une zone ───────────────────────────────────────────────────
 const AddZoneModal = ({ visible, onClose, navigation, initialCoords, onSaved }) => {
+  const [pays,        setPays]        = useState(null);   // { code, name, flag }
   const [ville,       setVille]       = useState('');
   const [gouvernorat, setGouvernorat] = useState('');
   const [delegation,  setDelegation]  = useState('');
@@ -316,50 +327,71 @@ const AddZoneModal = ({ visible, onClose, navigation, initialCoords, onSaved }) 
   const [lng,         setLng]         = useState('');
   const [saving,      setSaving]      = useState(false);
 
+  const [paysOpen,   setPaysOpen]   = useState(false);
   const [villeOpen,  setVilleOpen]  = useState(false);
   const [govOpen,    setGovOpen]    = useState(false);
   const [delOpen,    setDelOpen]    = useState(false);
 
-  // Listes chargées depuis l'API
-  const [villes,      setVilles]      = useState([]);
-  const [gouvernorats,setGouvernorats]= useState([]);
-  const [delegations, setDelegations] = useState([]);
-  const [loadingV,    setLoadingV]    = useState(false);
-  const [loadingG,    setLoadingG]    = useState(false);
-  const [loadingD,    setLoadingD]    = useState(false);
+  const isTunisia = pays?.code === 'TN';
 
-  // Charger gouvernorats au premier affichage
+  // Listes chargées depuis l'API
+  const [villes,       setVilles]       = useState([]);
+  const [gouvernorats, setGouvernorats] = useState([]);
+  const [delegations,  setDelegations]  = useState([]);
+  const [loadingV,     setLoadingV]     = useState(false);
+  const [loadingG,     setLoadingG]     = useState(false);
+  const [loadingD,     setLoadingD]     = useState(false);
+
+  // Reset cascade quand le pays change
   useEffect(() => {
-    if (!visible) return;
+    setVille(''); setGouvernorat(''); setDelegation('');
+    setVilles([]); setGouvernorats([]); setDelegations([]);
+    if (!initialCoords) { setLat(''); setLng(''); }
+  }, [pays]);
+
+  // Tunisia: charger gouvernorats (= "villes" dans le cascade Tunisia)
+  useEffect(() => {
+    if (!visible || !pays || !isTunisia) return;
     setLoadingV(true);
     fetch(`${API_URL}/localites/gouvernorats`)
       .then(r => r.json())
       .then(d => setVilles(d.gouvernorats || []))
+      .catch(() => Alert.alert('Erreur', 'Impossible de charger les gouvernorats.'))
+      .finally(() => setLoadingV(false));
+  }, [visible, pays]);
+
+  // Autres pays: charger les villes depuis /api/pays/:code/cities
+  useEffect(() => {
+    if (!visible || !pays || isTunisia) return;
+    setLoadingV(true);
+    fetch(`${API_URL}/pays/${pays.code}/cities`)
+      .then(r => r.json())
+      .then(d => setVilles(d.cities || []))
       .catch(() => Alert.alert('Erreur', 'Impossible de charger les villes.'))
       .finally(() => setLoadingV(false));
-  }, [visible]);
+  }, [visible, pays]);
 
-  // Charger délégations quand ville change
+  // Tunisia: délégations quand gouvernorat (ville) change
   useEffect(() => {
-    if (!ville) return;
+    if (!isTunisia || !ville) return;
     setLoadingG(true);
     fetch(`${API_URL}/localites/delegations?gouvernorat=${encodeURIComponent(ville)}`)
       .then(r => r.json())
       .then(d => setGouvernorats(d.delegations || []))
-      .catch(() => Alert.alert('Erreur', 'Impossible de charger les gouvernorats.'))
+      .catch(() => Alert.alert('Erreur', 'Impossible de charger les délégations.'))
       .finally(() => setLoadingG(false));
-  }, [ville]);
+  }, [ville, isTunisia]);
 
-  // Charger localités quand gouvernorat change
+  // Tunisia: localités quand délégation (gouvernorat) change
   useEffect(() => {
-    if (!ville || !gouvernorat) return;
+    if (!isTunisia || !ville || !gouvernorat) return;
     setLoadingD(true);
     fetch(`${API_URL}/localites?gouvernorat=${encodeURIComponent(ville)}&delegation=${encodeURIComponent(gouvernorat)}`)
       .then(r => r.json())
       .then(d => setDelegations(d.localites || []))
-      .catch(() => Alert.alert('Erreur', 'Impossible de charger les délégations.'))
+      .catch(() => Alert.alert('Erreur', 'Impossible de charger les localités.'))
       .finally(() => setLoadingD(false));
-  }, [ville, gouvernorat]);
+  }, [ville, gouvernorat, isTunisia]);
 
   useEffect(() => {
     if (initialCoords) {
@@ -368,25 +400,33 @@ const AddZoneModal = ({ visible, onClose, navigation, initialCoords, onSaved }) 
     }
   }, [initialCoords]);
 
+  const handleSelectPays = (p) => { setPays(p); };
+
+  // Tunisia selectors
   const handleSelectVille = (v) => {
     setVille(v); setGouvernorat(''); setDelegation('');
     if (!initialCoords) { setLat(''); setLng(''); }
   };
-
   const handleSelectGouvernorat = (g) => {
     setGouvernorat(g); setDelegation('');
     if (!initialCoords) { setLat(''); setLng(''); }
   };
-
   const handleSelectDelegation = (loc) => {
     setDelegation(loc.localite);
     setLat(loc.lat.toFixed(6));
     setLng(loc.lng.toFixed(6));
   };
 
+  // Other country: city selection (name is a string in cities array)
+  const handleSelectCity = (city) => {
+    setVille(city.name || city);
+  };
+
   const reset = () => {
+    setPays(null);
     setVille(''); setGouvernorat(''); setDelegation('');
     setNomZone(''); setLat(''); setLng('');
+    setVilles([]); setGouvernorats([]); setDelegations([]);
   };
 
   const handlePickOnMap = async () => {
@@ -396,9 +436,10 @@ const AddZoneModal = ({ visible, onClose, navigation, initialCoords, onSaved }) 
   };
 
   const handleConfirm = async () => {
-    if (!ville)         { Alert.alert('Erreur', 'Sélectionnez une ville.');           return; }
-    if (!gouvernorat)   { Alert.alert('Erreur', 'Sélectionnez un gouvernorat.');      return; }
-    if (!delegation)    { Alert.alert('Erreur', 'Sélectionnez une délégation.');      return; }
+    if (!pays)          { Alert.alert('Erreur', 'Sélectionnez un pays.');             return; }
+    if (!ville)         { Alert.alert('Erreur', isTunisia ? 'Sélectionnez un gouvernorat.' : 'Sélectionnez une ville.'); return; }
+    if (isTunisia && !gouvernorat) { Alert.alert('Erreur', 'Sélectionnez une délégation.'); return; }
+    if (isTunisia && !delegation)  { Alert.alert('Erreur', 'Sélectionnez une localité.');   return; }
     if (!nomZone.trim()){ Alert.alert('Erreur', 'Le nom de la zone est obligatoire.'); return; }
     if (!lat || !lng)   { Alert.alert('Erreur', 'Coordonnées manquantes.');            return; }
 
@@ -410,8 +451,9 @@ const AddZoneModal = ({ visible, onClose, navigation, initialCoords, onSaved }) 
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           name:        nomZone.trim(),
-          gouvernorat: ville,
-          ville:       gouvernorat,
+          pays:        pays.name,
+          gouvernorat: isTunisia ? ville       : '',
+          ville:       isTunisia ? gouvernorat : ville,
           lat:         parseFloat(lat),
           lng:         parseFloat(lng),
         }),
@@ -431,32 +473,48 @@ const AddZoneModal = ({ visible, onClose, navigation, initialCoords, onSaved }) 
 
   return (
     <>
-      {/* ─── Pickers en cascade ─── */}
+      {/* ─── Picker Pays ─── */}
+      <CascadePicker
+        visible={paysOpen}
+        title="Choisir un Pays"
+        items={PAYS_LIST.map(p => ({ ...p, label: `${p.flag}  ${p.name}` }))}
+        labelKey="label"
+        loading={false}
+        onSelect={handleSelectPays}
+        onClose={() => setPaysOpen(false)}
+      />
+
+      {/* ─── Pickers Tunisia ─── */}
       <CascadePicker
         visible={villeOpen}
-        title="Choisir une Ville"
+        title={isTunisia ? 'Choisir un Gouvernorat' : 'Choisir une Ville'}
         items={villes}
+        labelKey={isTunisia ? undefined : 'name'}
         loading={loadingV}
-        onSelect={handleSelectVille}
+        onSelect={isTunisia ? handleSelectVille : handleSelectCity}
         onClose={() => setVilleOpen(false)}
       />
-      <CascadePicker
-        visible={govOpen}
-        title="Choisir un Gouvernorat"
-        items={gouvernorats}
-        loading={loadingG}
-        onSelect={handleSelectGouvernorat}
-        onClose={() => setGovOpen(false)}
-      />
-      <CascadePicker
-        visible={delOpen}
-        title="Choisir une Délégation"
-        items={delegations}
-        labelKey="localite"
-        loading={loadingD}
-        onSelect={handleSelectDelegation}
-        onClose={() => setDelOpen(false)}
-      />
+      {isTunisia && (
+        <CascadePicker
+          visible={govOpen}
+          title="Choisir une Délégation"
+          items={gouvernorats}
+          loading={loadingG}
+          onSelect={handleSelectGouvernorat}
+          onClose={() => setGovOpen(false)}
+        />
+      )}
+      {isTunisia && (
+        <CascadePicker
+          visible={delOpen}
+          title="Choisir une Localité"
+          items={delegations}
+          labelKey="localite"
+          loading={loadingD}
+          onSelect={handleSelectDelegation}
+          onClose={() => setDelOpen(false)}
+        />
+      )}
 
       {/* ─── Formulaire ─── */}
       <Modal visible={visible} animationType="slide" transparent onRequestClose={() => { reset(); onClose(); }}>
@@ -473,40 +531,61 @@ const AddZoneModal = ({ visible, onClose, navigation, initialCoords, onSaved }) 
 
               <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
 
-                {/* ── Ville ── */}
-                <Text style={zf.label}>Ville <Text style={modal.required}>*</Text></Text>
-                <TouchableOpacity style={[zf.select, ville && zf.selectFilled]} onPress={() => setVilleOpen(true)} activeOpacity={0.8}>
-                  <Text style={[zf.selectText, !ville && zf.selectPlaceholder]} numberOfLines={1}>
-                    {ville || 'Sélectionner une ville…'}
+                {/* ── Pays ── */}
+                <Text style={zf.label}>Pays <Text style={modal.required}>*</Text></Text>
+                <TouchableOpacity style={[zf.select, pays && zf.selectFilled]} onPress={() => setPaysOpen(true)} activeOpacity={0.8}>
+                  <Text style={[zf.selectText, !pays && zf.selectPlaceholder]} numberOfLines={1}>
+                    {pays ? `${pays.flag}  ${pays.name}` : 'Sélectionner un pays…'}
                   </Text>
                   <Text style={zf.selectArrow}>▾</Text>
                 </TouchableOpacity>
 
-                {/* ── Gouvernorat ── */}
-                <Text style={zf.label}>Gouvernorat <Text style={modal.required}>*</Text></Text>
+                {/* ── Gouvernorat (Tunisia) / Ville (autres) ── */}
+                <Text style={zf.label}>
+                  {isTunisia ? 'Gouvernorat' : 'Ville'}
+                  {' '}<Text style={modal.required}>*</Text>
+                </Text>
                 <TouchableOpacity
-                  style={[zf.select, gouvernorat && zf.selectFilled, !ville && zf.selectDisabled]}
-                  onPress={() => ville && setGovOpen(true)}
-                  activeOpacity={ville ? 0.8 : 1}
+                  style={[zf.select, ville && zf.selectFilled, !pays && zf.selectDisabled]}
+                  onPress={() => pays && setVilleOpen(true)}
+                  activeOpacity={pays ? 0.8 : 1}
                 >
-                  <Text style={[zf.selectText, !gouvernorat && zf.selectPlaceholder]} numberOfLines={1}>
-                    {gouvernorat || (ville ? 'Sélectionner un gouvernorat…' : 'Choisissez d\'abord une ville')}
+                  <Text style={[zf.selectText, !ville && zf.selectPlaceholder]} numberOfLines={1}>
+                    {ville || (pays
+                      ? (isTunisia ? 'Sélectionner un gouvernorat…' : 'Sélectionner une ville…')
+                      : 'Choisissez d\'abord un pays')}
                   </Text>
-                  <Text style={zf.selectArrow}>{ville ? '▾' : '—'}</Text>
+                  <Text style={zf.selectArrow}>{pays ? '▾' : '—'}</Text>
                 </TouchableOpacity>
 
-                {/* ── Délégation ── */}
-                <Text style={zf.label}>Délégation <Text style={modal.required}>*</Text></Text>
-                <TouchableOpacity
-                  style={[zf.select, delegation && zf.selectFilled, !gouvernorat && zf.selectDisabled]}
-                  onPress={() => gouvernorat && setDelOpen(true)}
-                  activeOpacity={gouvernorat ? 0.8 : 1}
-                >
-                  <Text style={[zf.selectText, !delegation && zf.selectPlaceholder]} numberOfLines={1}>
-                    {delegation || (gouvernorat ? 'Sélectionner une délégation…' : 'Choisissez d\'abord un gouvernorat')}
-                  </Text>
-                  <Text style={zf.selectArrow}>{gouvernorat ? '▾' : '—'}</Text>
-                </TouchableOpacity>
+                {/* ── Délégation (Tunisia only) ── */}
+                {isTunisia && (
+                  <>
+                    <Text style={zf.label}>Délégation <Text style={modal.required}>*</Text></Text>
+                    <TouchableOpacity
+                      style={[zf.select, gouvernorat && zf.selectFilled, !ville && zf.selectDisabled]}
+                      onPress={() => ville && setGovOpen(true)}
+                      activeOpacity={ville ? 0.8 : 1}
+                    >
+                      <Text style={[zf.selectText, !gouvernorat && zf.selectPlaceholder]} numberOfLines={1}>
+                        {gouvernorat || (ville ? 'Sélectionner une délégation…' : 'Choisissez d\'abord un gouvernorat')}
+                      </Text>
+                      <Text style={zf.selectArrow}>{ville ? '▾' : '—'}</Text>
+                    </TouchableOpacity>
+
+                    <Text style={zf.label}>Localité <Text style={modal.required}>*</Text></Text>
+                    <TouchableOpacity
+                      style={[zf.select, delegation && zf.selectFilled, !gouvernorat && zf.selectDisabled]}
+                      onPress={() => gouvernorat && setDelOpen(true)}
+                      activeOpacity={gouvernorat ? 0.8 : 1}
+                    >
+                      <Text style={[zf.selectText, !delegation && zf.selectPlaceholder]} numberOfLines={1}>
+                        {delegation || (gouvernorat ? 'Sélectionner une localité…' : 'Choisissez d\'abord une délégation')}
+                      </Text>
+                      <Text style={zf.selectArrow}>{gouvernorat ? '▾' : '—'}</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
 
                 {/* ── Nom de la Zone ── */}
                 <Text style={zf.label}>Nom de la Zone <Text style={modal.required}>*</Text></Text>
@@ -823,6 +902,9 @@ function ZonesView({ onBack, onAdd, onImport, onExport, zones, loading, onDelete
               </View>
               <View style={styles.zoneCardInfo}>
                 <Text style={styles.zoneCardName} numberOfLines={1}>{z.name}</Text>
+                {z.pays ? (
+                  <Text style={styles.zoneCardPays} numberOfLines={1}>{z.pays}</Text>
+                ) : null}
                 {(z.gouvernorat || z.ville) ? (
                   <Text style={styles.zoneCardLocation} numberOfLines={1}>
                     {[z.gouvernorat, z.ville].filter(Boolean).join(' · ')}
@@ -1557,6 +1639,7 @@ const styles = StyleSheet.create({
   },
   zoneCardInfo:     { flex: 1, gap: 2 },
   zoneCardName:     { fontSize: 14, fontWeight: '800', color: C.greyDark },
+  zoneCardPays:     { fontSize: 11, fontWeight: '700', color: C.blue, marginBottom: 1 },
   zoneCardLocation: { fontSize: 12, color: C.grey },
   zoneCardCoords:   { fontSize: 11, color: '#B0B3C6', fontWeight: '600' },
   zoneDeleteBtn: {
