@@ -1,0 +1,62 @@
+{
+  "expo": {
+    "name": "ByMap",
+    "slug": "ByMap",
+    "scheme": "bymap",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/logo.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#140729"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.bymap.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "ByMap utilise votre position pour afficher votre emplacement sur la carte.",
+        "NSLocationAlwaysUsageDescription": "ByMap utilise votre position pour le suivi en temps réel.",
+        "NSMicrophoneUsageDescription": "ByMap utilise le microphone pour les appels vocaux.",
+        "NSCameraUsageDescription": "ByMap utilise la caméra pour les appels vidéo."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/logo.png",
+        "backgroundColor": "#140729"
+      },
+      "package": "com.bymap.app",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyDIJ9XX2ZvRKCJcFRrl-lRanEtFUow4piM"
+        }
+      },
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "RECORD_AUDIO",
+        "CAMERA",
+        "MODIFY_AUDIO_SETTINGS"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/logo.png"
+    },
+    "plugins": [
+      "expo-dev-client",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "ByMap utilise votre position pour afficher votre emplacement sur la carte.",
+          "locationAlwaysAndWhenInUsePermission": "ByMap utilise votre position pour le suivi en temps réel."
+        }
+      ],
+      "expo-video",
+      "expo-web-browser",
+      "expo-audio"
+    ]
+  }
+}
