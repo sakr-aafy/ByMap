@@ -1,14 +1,15 @@
 // src/screens/LoginScreen.js
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { FontAwesome6 } from '@expo/vector-icons';
 import {
   StyleSheet, View, Text, TextInput, TouchableOpacity,
   KeyboardAvoidingView, Platform, ScrollView,
-  Animated, Alert, ActivityIndicator,
+  Alert, ActivityIndicator, Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
@@ -17,9 +18,6 @@ import * as AppleAuthentication from 'expo-apple-authentication';
 import {
   login as apiLogin,
   register as apiRegister,
-  verifyEmail as apiVerifyEmail,
-  resendVerification as apiResend,
-  verifyLoginOtp as apiVerifyLoginOtp,
   socialLogin as apiSocialLogin,
 } from '../utils/api';
 import {
@@ -29,15 +27,16 @@ import {
   FACEBOOK_APP_ID,
 } from '../config/oauth';
 import { useCall } from '../context/CallContext';
-import { useTranslation } from 'react-i18next';
 
-// Nécessaire pour que le redirect OAuth fonctionne dans Expo Go
 WebBrowser.maybeCompleteAuthSession();
 
-// ─── Palette mint clair ──────────────────────────────────────────────────────
+// ── Palette — même thème que LocalScreen ─────────────────────────────────────
 const C = {
-  green:     '#2DBD7E', greenDark: '#22A06B', greenLight: 'rgba(45,189,126,0.12)',
-  blue:      '#3B7EF6', blueLight: 'rgba(59,126,246,0.10)',
+  green:     '#2DBD7E',
+  greenDark: '#22A06B',
+  greenGlow: 'rgba(45,189,126,0.12)',
+  blue:      '#3B7EF6',
+  blueGlow:  'rgba(59,126,246,0.12)',
   bg:        '#F2F5F3',
   white:     '#FFFFFF',
   text:      '#1A1A2E',
@@ -45,280 +44,173 @@ const C = {
   textFaint: '#9CA3AF',
   border:    '#E5E7EB',
   inputBg:   '#F8FAFB',
+  card:      '#FFFFFF',
   red:       '#EF4444',
-  facebook:  '#1877F2', google: '#EA4335', apple: '#000000',
+  facebook:  '#1877F2',
+  google:    '#EA4335',
 };
 
-// ─── Texte d'erreur inline ───────────────────────────────────────────────────
-const ErrText = ({ msg }) =>
-  msg ? <Text style={styles.errText}>{msg}</Text> : null;
-
-// ─── InputField ─────────────────────────────────────────────────────────────
+// ── Champ de saisie ───────────────────────────────────────────────────────────
 const InputField = ({
   iconName, placeholder, value, onChangeText,
   keyboardType = 'default', secureTextEntry = false,
-  prefix, error, maxLength,
+  prefix, error, maxLength, autoFocus, autoCapitalize = 'none',
 }) => {
   const [focused, setFocused] = useState(false);
   const [hidden,  setHidden]  = useState(secureTextEntry);
-  const borderAnim = useRef(new Animated.Value(0)).current;
-
-  const onFocus = () => {
-    setFocused(true);
-    Animated.timing(borderAnim, { toValue: 1, duration: 200, useNativeDriver: false }).start();
-  };
-  const onBlur = () => {
-    setFocused(false);
-    Animated.timing(borderAnim, { toValue: 0, duration: 200, useNativeDriver: false }).start();
-  };
-
-  const borderColor = borderAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [error ? C.red : C.border, error ? C.red : C.green],
-  });
 
   return (
-    <View style={styles.inputGroup}>
-      <Animated.View style={[
-        styles.inputWrap,
-        { borderColor },
-        error && styles.inputWrapError,
+    <View style={s.inputGroup}>
+      <View style={[
+        s.inputWrap,
+        focused && s.inputWrapFocused,
+        error   && s.inputWrapError,
       ]}>
         {iconName && (
-          <View style={styles.inputIconLeft}>
+          <View style={s.inputIconLeft}>
             <FontAwesome6
-              name={iconName}
-              size={14}
+              name={iconName} size={14}
               color={error ? C.red : (focused ? C.green : C.textFaint)}
             />
           </View>
         )}
-        {prefix && <Text style={styles.inputPrefix}>{prefix}</Text>}
+        {prefix && <Text style={s.inputPrefix}>{prefix}</Text>}
         <TextInput
-          style={styles.inputText}
+          style={s.inputText}
           placeholder={placeholder}
           placeholderTextColor={C.textFaint}
           value={value}
           onChangeText={onChangeText}
           keyboardType={keyboardType}
-          autoCapitalize="none"
+          autoCapitalize={autoCapitalize}
           secureTextEntry={hidden}
-          onFocus={onFocus}
-          onBlur={onBlur}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           maxLength={maxLength}
+          autoFocus={autoFocus}
         />
         {secureTextEntry && (
-          <TouchableOpacity onPress={() => setHidden(!hidden)} style={styles.inputIconRight}>
-            <FontAwesome6
-              name={hidden ? 'eye' : 'eye-slash'}
-              size={14}
-              color={C.textFaint}
-            />
+          <TouchableOpacity onPress={() => setHidden(!hidden)} style={s.inputIconRight} hitSlop={8}>
+            <FontAwesome6 name={hidden ? 'eye' : 'eye-slash'} size={14} color={C.textFaint} />
           </TouchableOpacity>
         )}
-      </Animated.View>
-      <ErrText msg={error} />
+      </View>
+      {error ? <Text style={s.errText}>{error}</Text> : null}
     </View>
   );
 };
 
-// ─── Bouton social ───────────────────────────────────────────────────────────
-const SocialBtn = ({ label, faIcon, iconColor, onPress }) => (
-  <TouchableOpacity style={styles.socialBtn} onPress={onPress} activeOpacity={0.85}>
-    <FontAwesome6 name={faIcon} size={18} color={iconColor} />
-    <Text style={styles.socialLabel}>{label}</Text>
-  </TouchableOpacity>
-);
-
-// ─── Composant principal ─────────────────────────────────────────────────────
+// ── Composant principal ───────────────────────────────────────────────────────
 export default function LoginScreen() {
-  const navigation   = useNavigation();
-  const route        = useRoute();
-  const { connect }  = useCall();
-  const { t }        = useTranslation();
-  const initTab    = route.params?.tab || 'login';
+  const navigation = useNavigation();
+  const route      = useRoute();
+  const { connect } = useCall();
 
-  // ── Auth state ────────────────────────────────────────────────────────────
-  const [tab,      setTab]      = useState(initTab);
-  const [name,     setName]     = useState('');
-  const [prenom,   setPrenom]   = useState('');
-  const [email,    setEmail]    = useState('');
-  const [phone,    setPhone]    = useState('');
-  const [password, setPassword] = useState('');
-  const [confirm,  setConfirm]  = useState('');
-  const [errors,   setErrors]   = useState({});
-  const [loading,  setLoading]  = useState(false);
+  const initMode = route.params?.tab === 'login' ? 'login' : 'register';
 
-  // ── Verification state ────────────────────────────────────────────────────
-  const [step,         setStep]         = useState('auth');
-  const [pendingEmail, setPendingEmail] = useState('');
-  const [digits,       setDigits]       = useState(['','','','','','']);
-  const [countdown,    setCountdown]    = useState(0);
-  const [verifyError,  setVerifyError]  = useState('');
-  const digitRef0 = useRef(null);
-  const digitRef1 = useRef(null);
-  const digitRef2 = useRef(null);
-  const digitRef3 = useRef(null);
-  const digitRef4 = useRef(null);
-  const digitRef5 = useRef(null);
-  const digitRefs = [digitRef0, digitRef1, digitRef2, digitRef3, digitRef4, digitRef5];
+  const [screen,   setScreen]   = useState(initMode); // 'register' | 'login'
+  const [regStep,  setRegStep]  = useState(1);         // 1 = identité+contact, 2 = mot de passe
+  const [regType,  setRegType]  = useState('phone');   // 'phone' | 'email'
+  const [loginTab, setLoginTab] = useState('phone');   // 'phone' | 'email'
 
-  // ── Animations ────────────────────────────────────────────────────────────
-  const slideAnim = useRef(new Animated.Value(0)).current;
+  // Champs
+  const [prenom,     setPrenom]     = useState('');
+  const [nom,        setNom]        = useState('');
+  const [phone,      setPhone]      = useState('');
+  const [email,      setEmail]      = useState('');
+  const [password,   setPassword]   = useState('');
+  const [confirm,    setConfirm]    = useState('');
+  const [saveLogin,  setSaveLogin]  = useState(true);
+  const [errors,     setErrors]     = useState({});
+  const [loading,    setLoading]    = useState(false);
+
+  // Animation d'entrée
   const fadeAnim  = useRef(new Animated.Value(0)).current;
-  const tabIndicX = useRef(new Animated.Value(tab === 'login' ? 0 : 1)).current;
-
+  const slideAnim = useRef(new Animated.Value(24)).current;
   useEffect(() => {
     Animated.parallel([
-      Animated.timing(fadeAnim,  { toValue: 1, duration: 500, useNativeDriver: true }),
-      Animated.spring(slideAnim, { toValue: 1, tension: 60, friction: 10, useNativeDriver: true }),
+      Animated.timing(fadeAnim,  { toValue: 1, duration: 400, useNativeDriver: true }),
+      Animated.timing(slideAnim, { toValue: 0, duration: 400, useNativeDriver: true }),
     ]).start();
-  }, []);
+  }, [screen]);
 
-  // Countdown resend
-  useEffect(() => {
-    if (countdown <= 0) return;
-    const id = setTimeout(() => setCountdown(c => c - 1), 1000);
-    return () => clearTimeout(id);
-  }, [countdown]);
-
-  const switchTab = (t) => {
-    setTab(t);
+  const goTo = (s) => {
+    setScreen(s);
     setErrors({});
-    Animated.spring(tabIndicX, {
-      toValue: t === 'login' ? 0 : 1,
-      tension: 80, friction: 12, useNativeDriver: false,
-    }).start();
+    setRegStep(1);
+    fadeAnim.setValue(0);
+    slideAnim.setValue(24);
   };
 
-  const indicatorLeft = tabIndicX.interpolate({
-    inputRange: [0, 1], outputRange: ['2%', '50%'],
-  });
+  // ── Validation ─────────────────────────────────────────────────────────────
+  const validateStep1 = () => {
+    const e = {};
+    if (!prenom.trim()) e.prenom = 'Prénom requis';
+    const val = regType === 'phone' ? phone : email;
+    if (!val) {
+      e.contact = regType === 'phone' ? 'Numéro requis' : 'E-mail requis';
+    } else if (regType === 'email' && !/^\S+@\S+\.\S+$/.test(val)) {
+      e.contact = 'Format e-mail invalide';
+    } else if (regType === 'phone' && !/^\d{8}$/.test(val)) {
+      e.contact = 'Numéro invalide (8 chiffres)';
+    }
+    return e;
+  };
 
-  // ─── Validation ───────────────────────────────────────────────────────────
+  const validateStep2 = () => {
+    const e = {};
+    if (!password) e.password = 'Mot de passe requis';
+    else if (password.length < 6) e.password = 'Minimum 6 caractères';
+    if (!confirm) e.confirm = 'Confirmation requise';
+    else if (password !== confirm) e.confirm = 'Les mots de passe ne correspondent pas';
+    return e;
+  };
+
   const validateLogin = () => {
     const e = {};
-    if (!email && !phone)
-      e.emailOrPhone = t('login.errEmailPhone');
-    if (email && !/^\S+@\S+\.\S+$/.test(email))
-      e.email = t('login.errEmailFormat');
-    if (phone && !/^\d{8}$/.test(phone))
-      e.phone = t('login.errPhone');
-    if (!password)
-      e.password = t('login.errPassword');
+    const val = loginTab === 'phone' ? phone : email;
+    if (!val) {
+      e.contact = loginTab === 'phone' ? 'Numéro requis' : 'E-mail requis';
+    } else if (loginTab === 'email' && !/^\S+@\S+\.\S+$/.test(val)) {
+      e.contact = 'Format e-mail invalide';
+    } else if (loginTab === 'phone' && !/^\d{8}$/.test(val)) {
+      e.contact = 'Numéro invalide (8 chiffres)';
+    }
+    if (!password) e.password = 'Mot de passe requis';
     return e;
   };
 
-  const validateSignUp = () => {
-    const e = {};
-    if (name && name.trim().length < 2)
-      e.name = t('login.errMin2');
-    if (prenom && prenom.trim().length < 2)
-      e.prenom = t('login.errMin2');
-    if (!email)
-      e.email = t('login.errEmailRequired');
-    else if (!/^\S+@\S+\.\S+$/.test(email))
-      e.email = t('login.errEmailFormat');
-    if (phone && !/^\d{8}$/.test(phone))
-      e.phone = t('login.errPhone');
-    if (!password)
-      e.password = t('login.errPassword');
-    else if (password.length < 6)
-      e.password = t('login.errMin6');
-    if (!confirm)
-      e.confirm = t('login.errConfirmPassword');
-    else if (password !== confirm)
-      e.confirm = t('login.errPasswordMatch');
-    return e;
+  // ── Handlers ───────────────────────────────────────────────────────────────
+  const handleRegContinue = () => {
+    if (regStep === 1) {
+      const e = validateStep1();
+      if (Object.keys(e).length) { setErrors(e); return; }
+      setErrors({});
+      setRegStep(2);
+    } else {
+      handleSignUp();
+    }
   };
 
-  // ─── Connexion ────────────────────────────────────────────────────────────
-  const handleLogin = async () => {
-    const e = validateLogin();
+  const handleSignUp = async () => {
+    const e = validateStep2();
     if (Object.keys(e).length) { setErrors(e); return; }
     setErrors({});
     setLoading(true);
     try {
-      const data = await apiLogin({
-        email:    email || undefined,
-        phone:    phone || undefined,
+      const data = await apiRegister({
+        prenom,
+        nom: nom.trim() || undefined,
+        email: regType === 'email' ? email : undefined,
+        phone: regType === 'phone' ? phone : undefined,
         password,
       });
       await connect();
       if (data.user?.role === 'admin') {
         navigation.replace('AdminDashboard');
       } else {
-        navigation.replace('Map');
+        navigation.replace('WelcomeNew', { user: data.user });
       }
-    } catch (err) {
-      if (err.emailVerificationRequired) {
-        setPendingEmail(err.email || email);
-        setDigits(['','','','','','']);
-        setVerifyError('');
-        setCountdown(60);
-        setStep('verify');
-      } else if (err.loginOtpRequired) {
-        setPendingEmail(err.email);
-        setDigits(['','','','','','']);
-        setVerifyError('');
-        setCountdown(60);
-        setStep('loginOtp');
-      } else {
-        setErrors({ global: err.message });
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ─── Vérification OTP connexion ───────────────────────────────────────────
-  const handleVerifyLoginOtp = async () => {
-    const code = digits.join('');
-    if (code.length < 6) { setVerifyError(t('login.errCode')); return; }
-    setVerifyError('');
-    setLoading(true);
-    try {
-      const data = await apiVerifyLoginOtp({ email: pendingEmail, code });
-      await connect();
-      if (data.user?.role === 'admin') {
-        navigation.replace('AdminDashboard');
-      } else {
-        navigation.replace('Map');
-      }
-    } catch (err) {
-      setVerifyError(err.message);
-      setDigits(['','','','','','']);
-      digitRefs[0].current?.focus();
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleResendLoginOtp = async () => {
-    if (countdown > 0) return;
-    try {
-      await apiLogin({ email: pendingEmail, password });
-      setCountdown(60);
-      setDigits(['','','','','','']);
-      setVerifyError('');
-    } catch {
-      // silencieux
-    }
-  };
-
-  // ─── Inscription ──────────────────────────────────────────────────────────
-  const handleSignUp = async () => {
-    const e = validateSignUp();
-    if (Object.keys(e).length) { setErrors(e); return; }
-    setErrors({});
-    setLoading(true);
-    try {
-      await apiRegister({ nom: name, prenom, email, phone: phone || undefined, password });
-      setPendingEmail(email);
-      setDigits(['','','','','','']);
-      setVerifyError('');
-      setCountdown(60);
-      setStep('verify');
     } catch (err) {
       setErrors({ global: err.message });
     } finally {
@@ -326,68 +218,33 @@ export default function LoginScreen() {
     }
   };
 
-  // ─── Vérification email ───────────────────────────────────────────────────
-  const handleVerify = async () => {
-    const code = digits.join('');
-    if (code.length < 6) {
-      setVerifyError(t('login.errCode'));
-      return;
-    }
-    setVerifyError('');
+  const handleLogin = async () => {
+    const e = validateLogin();
+    if (Object.keys(e).length) { setErrors(e); return; }
+    setErrors({});
     setLoading(true);
     try {
-      const data = await apiVerifyEmail({ email: pendingEmail, code });
+      const data = await apiLogin({
+        email: loginTab === 'email' ? email : undefined,
+        phone: loginTab === 'phone' ? phone : undefined,
+        password,
+      });
       await connect();
-      if (data.user?.role === 'admin') {
-        navigation.replace('AdminDashboard');
-      } else {
-        navigation.replace('Map');
-      }
+      navigation.replace(data.user?.role === 'admin' ? 'AdminDashboard' : 'Map');
     } catch (err) {
-      setVerifyError(err.message);
-      setDigits(['','','','','','']);
-      digitRefs[0].current?.focus();
+      setErrors({ global: err.message });
     } finally {
       setLoading(false);
     }
   };
 
-  const handleResend = async () => {
-    if (countdown > 0) return;
-    try {
-      await apiResend({ email: pendingEmail });
-      setCountdown(60);
-      setVerifyError('');
-      Alert.alert('Code envoyé', `Un nouveau code a été envoyé à ${pendingEmail}`);
-    } catch (err) {
-      Alert.alert('Erreur', err.message);
-    }
-  };
-
-  // OTP digit input
-  const handleDigit = (val, idx) => {
-    const clean = val.replace(/[^0-9]/g, '').slice(-1);
-    const next  = [...digits];
-    next[idx]   = clean;
-    setDigits(next);
-    if (clean && idx < 5) digitRefs[idx + 1].current?.focus();
-  };
-
-  const handleDigitKey = (e, idx) => {
-    if (e.nativeEvent.key === 'Backspace' && !digits[idx] && idx > 0) {
-      digitRefs[idx - 1].current?.focus();
-    }
-  };
-
-  // ─── Social login hooks ───────────────────────────────────────────────────
+  // ── Social ─────────────────────────────────────────────────────────────────
   const [, googleResponse, googlePromptAsync] = Google.useAuthRequest({
     webClientId:     GOOGLE_WEB_CLIENT_ID,
     iosClientId:     GOOGLE_IOS_CLIENT_ID,
     androidClientId: GOOGLE_ANDROID_CLIENT_ID,
   });
-  const [, fbResponse, fbPromptAsync] = Facebook.useAuthRequest({
-    clientId: FACEBOOK_APP_ID,
-  });
+  const [, fbResponse, fbPromptAsync] = Facebook.useAuthRequest({ clientId: FACEBOOK_APP_ID });
 
   useEffect(() => {
     if (googleResponse?.type === 'success') {
@@ -415,543 +272,717 @@ export default function LoginScreen() {
   const handleFacebook = () => fbPromptAsync();
   const handleApple    = async () => {
     try {
-      const credential = await AppleAuthentication.signInAsync({
+      const cred = await AppleAuthentication.signInAsync({
         requestedScopes: [
           AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
           AppleAuthentication.AppleAuthenticationScope.EMAIL,
         ],
       });
       setLoading(true);
-      const name = [credential.fullName?.givenName, credential.fullName?.familyName]
-        .filter(Boolean).join(' ');
-      await apiSocialLogin({
-        provider: 'apple',
-        token:    credential.identityToken,
-        name,
-        email:    credential.email,
-      });
+      const name = [cred.fullName?.givenName, cred.fullName?.familyName].filter(Boolean).join(' ');
+      await apiSocialLogin({ provider: 'apple', token: cred.identityToken, name, email: cred.email });
       await connect();
       navigation.replace('Map');
     } catch (e) {
-      if (e.code !== 'ERR_REQUEST_CANCELED') {
-        Alert.alert('Erreur Apple', 'Connexion Apple échouée.');
-      }
+      if (e.code !== 'ERR_REQUEST_CANCELED') Alert.alert('Erreur Apple', 'Connexion Apple échouée.');
     } finally {
       setLoading(false);
     }
   };
 
-  // ─── ÉCRAN VÉRIFICATION ───────────────────────────────────────────────────
-  if (step === 'verify') {
+  const canStep1  = prenom.trim().length > 0 && (phone.length > 0 || email.length > 0);
+  const canStep2  = password.length > 0 && confirm.length > 0;
+  const canLogin  = (loginTab === 'phone' ? phone : email).length > 0 && password.length > 0;
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // REGISTER SCREEN
+  // ════════════════════════════════════════════════════════════════════════════
+  if (screen === 'register') {
     return (
-      <View style={{ flex: 1, backgroundColor: C.bg }}>
-        <SafeAreaView style={styles.safe}>
+      <View style={s.container}>
+        {/* Blobs décoratifs — même style que LocalScreen */}
+        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+          <View style={s.blobTopRight} />
+          <View style={s.blobBottomLeft} />
+        </View>
+
+        <SafeAreaView style={s.safe}>
           <StatusBar style="dark" />
-          <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-            <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
 
-              {/* Back */}
-              <TouchableOpacity style={styles.backBtn} onPress={() => setStep('auth')} activeOpacity={0.7}>
-                <View style={styles.backCircle}>
-                  <FontAwesome6 name="arrow-left" size={16} color={C.text} />
+          {/* ── Header ── */}
+          <View style={s.header}>
+            <LinearGradient colors={[C.green, C.greenDark]} style={s.headerLogo}>
+              <FontAwesome6 name="location-dot" size={17} color="#FFFFFF" />
+            </LinearGradient>
+            <Text style={s.headerAppName}>ByMap</Text>
+            <View style={{ flex: 1 }} />
+            <TouchableOpacity onPress={() => navigation.goBack()} style={s.headerCloseBtn} hitSlop={8}>
+              <FontAwesome6 name="xmark" size={17} color={C.text} />
+            </TouchableOpacity>
+          </View>
+
+          <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <ScrollView
+              contentContainerStyle={s.scroll}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+
+                {/* Titre */}
+                <Text style={s.pageTitle}>Inscription</Text>
+                <Text style={s.pageSubtitle}>Rejoins la communauté locale ByMap</Text>
+
+                {/* Indicateur de progression */}
+                <View style={s.progressRow}>
+                  <View style={[s.progressDot, s.progressDotActive]} />
+                  <View style={[s.progressLine, regStep === 2 && s.progressLineActive]} />
+                  <View style={[s.progressDot, regStep === 2 && s.progressDotActive]} />
                 </View>
-              </TouchableOpacity>
 
-              {/* Icon & titre */}
-              <View style={styles.verifyHeader}>
-                <View style={styles.verifyIconWrap}>
-                  <FontAwesome6 name="envelope" size={34} color={C.green} />
-                </View>
-                <Text style={styles.verifyTitle}>{t('login.verifyEmail')}</Text>
-                <Text style={styles.verifySubtitle}>
-                  {t('login.codeSentTo')}{'\n'}
-                  <Text style={{ color: C.green, fontWeight: '700' }}>{pendingEmail}</Text>
-                </Text>
-              </View>
-
-              {/* OTP boxes */}
-              <View style={styles.otpRow}>
-                {digits.map((d, i) => (
-                  <TextInput
-                    key={i}
-                    ref={digitRefs[i]}
-                    style={[
-                      styles.otpBox,
-                      d ? styles.otpBoxFilled : null,
-                      verifyError ? styles.otpBoxError : null,
-                    ]}
-                    value={d}
-                    onChangeText={(v) => handleDigit(v, i)}
-                    onKeyPress={(e) => handleDigitKey(e, i)}
-                    keyboardType="number-pad"
-                    maxLength={1}
-                    selectTextOnFocus
-                    textAlign="center"
-                  />
-                ))}
-              </View>
-
-              {verifyError ? (
-                <Text style={styles.verifyError}>{verifyError}</Text>
-              ) : null}
-
-              {/* Bouton vérifier */}
-              <TouchableOpacity
-                style={[styles.primaryBtn, loading && { opacity: 0.7 }]}
-                onPress={handleVerify}
-                disabled={loading}
-                activeOpacity={0.88}
-              >
-                {loading
-                  ? <ActivityIndicator color="#FFFFFF" />
-                  : <Text style={styles.primaryBtnText}>{t('login.verifyBtn')}</Text>
-                }
-              </TouchableOpacity>
-
-              {/* Renvoi */}
-              <View style={styles.resendRow}>
-                <Text style={styles.resendLabel}>{t('login.noCode')} </Text>
-                <TouchableOpacity onPress={handleResend} disabled={countdown > 0}>
-                  <Text style={[styles.resendLink, countdown > 0 && styles.resendDisabled]}>
-                    {countdown > 0 ? t('login.resendIn', { countdown }) : t('login.resend')}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-            </ScrollView>
-          </KeyboardAvoidingView>
-        </SafeAreaView>
-      </View>
-    );
-  }
-
-  // ─── ÉCRAN OTP CONNEXION ─────────────────────────────────────────────────
-  if (step === 'loginOtp') {
-    return (
-      <View style={{ flex: 1, backgroundColor: C.bg }}>
-        <SafeAreaView style={styles.safe}>
-          <StatusBar style="dark" />
-          <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-            <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-
-              <TouchableOpacity style={styles.backBtn} onPress={() => setStep('auth')} activeOpacity={0.7}>
-                <View style={styles.backCircle}>
-                  <FontAwesome6 name="arrow-left" size={16} color={C.text} />
-                </View>
-              </TouchableOpacity>
-
-              <View style={styles.verifyHeader}>
-                <View style={styles.verifyIconWrap}>
-                  <FontAwesome6 name="lock" size={34} color={C.green} />
-                </View>
-                <Text style={styles.verifyTitle}>{t('login.loginVerification')}</Text>
-                <Text style={styles.verifySubtitle}>
-                  {t('login.codeSentTo')}{'\n'}
-                  <Text style={{ color: C.green, fontWeight: '700' }}>{pendingEmail}</Text>
-                </Text>
-              </View>
-
-              <View style={styles.otpRow}>
-                {digits.map((d, i) => (
-                  <TextInput
-                    key={i}
-                    ref={digitRefs[i]}
-                    style={[
-                      styles.otpBox,
-                      d ? styles.otpBoxFilled : null,
-                      verifyError ? styles.otpBoxError : null,
-                    ]}
-                    value={d}
-                    onChangeText={(v) => handleDigit(v, i)}
-                    onKeyPress={(e) => handleDigitKey(e, i)}
-                    keyboardType="number-pad"
-                    maxLength={1}
-                    selectTextOnFocus
-                    textAlign="center"
-                  />
-                ))}
-              </View>
-
-              {verifyError ? <Text style={styles.verifyError}>{verifyError}</Text> : null}
-
-              <TouchableOpacity
-                style={[styles.primaryBtn, loading && { opacity: 0.7 }]}
-                onPress={handleVerifyLoginOtp}
-                disabled={loading}
-                activeOpacity={0.88}
-              >
-                {loading
-                  ? <ActivityIndicator color="#FFFFFF" />
-                  : <Text style={styles.primaryBtnText}>{t('login.confirmLogin')}</Text>
-                }
-              </TouchableOpacity>
-
-              <View style={styles.resendRow}>
-                <Text style={styles.resendLabel}>{t('login.codeNotReceived')} </Text>
-                <TouchableOpacity onPress={handleResendLoginOtp} disabled={countdown > 0}>
-                  <Text style={[styles.resendLink, countdown > 0 && styles.resendDisabled]}>
-                    {countdown > 0 ? t('login.resendIn', { countdown }) : t('login.resend')}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-            </ScrollView>
-          </KeyboardAvoidingView>
-        </SafeAreaView>
-      </View>
-    );
-  }
-
-  // ─── ÉCRAN AUTH ───────────────────────────────────────────────────────────
-  return (
-    <View style={{ flex: 1, backgroundColor: C.bg }}>
-      {/* Blobs décoratifs */}
-      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-        <View style={styles.blobTopRight} />
-        <View style={styles.blobBottomLeft} />
-      </View>
-
-      <SafeAreaView style={styles.safe}>
-        <StatusBar style="dark" />
-        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-
-            {/* Header */}
-            <Animated.View style={[styles.header, {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim.interpolate({ inputRange: [0,1], outputRange: [-20,0] }) }],
-            }]}>
-              <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.7}>
-                <View style={styles.backCircle}>
-                  <FontAwesome6 name="arrow-left" size={16} color={C.text} />
-                </View>
-              </TouchableOpacity>
-              <View style={styles.brandRow}>
-                <FontAwesome6 name="location-dot" size={22} color={C.green} />
-                <Text style={styles.brandName}>ByMap</Text>
-              </View>
-            </Animated.View>
-
-            {/* Tabs */}
-            <Animated.View style={[styles.tabBar, { opacity: fadeAnim }]}>
-              <Animated.View style={[styles.tabIndicatorWrapper, { left: indicatorLeft }]}>
-                <View style={styles.tabIndicator} />
-              </Animated.View>
-              <TouchableOpacity style={styles.tabBtn} onPress={() => switchTab('login')} activeOpacity={0.8}>
-                <Text style={[styles.tabText, tab === 'login' && styles.tabTextActive]}>{t('login.tabLogin')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.tabBtn} onPress={() => switchTab('signup')} activeOpacity={0.8}>
-                <Text style={[styles.tabText, tab === 'signup' && styles.tabTextActive]}>{t('login.tabRegister')}</Text>
-              </TouchableOpacity>
-            </Animated.View>
-
-            {/* Erreur globale */}
-            {errors.global ? (
-              <View style={styles.globalErrBox}>
-                <FontAwesome6 name="circle-exclamation" size={14} color={C.red} style={{ marginRight: 6 }} />
-                <Text style={styles.globalErrText}>{errors.global}</Text>
-              </View>
-            ) : null}
-
-            {/* ── Formulaire LOGIN ── */}
-            {tab === 'login' && (
-              <Animated.View style={[styles.form, { opacity: fadeAnim }]}>
-
-                {errors.emailOrPhone ? (
-                  <View style={styles.globalErrBox}>
-                    <Text style={styles.globalErrText}>{errors.emailOrPhone}</Text>
+                {errors.global ? (
+                  <View style={s.errGlobalBox}>
+                    <FontAwesome6 name="circle-exclamation" size={14} color={C.red} />
+                    <Text style={s.errGlobal}>{errors.global}</Text>
                   </View>
                 ) : null}
 
-                <InputField
-                  iconName="envelope"
-                  placeholder={t('login.email')}
-                  value={email}
-                  onChangeText={(v) => { setEmail(v); setErrors(p => ({ ...p, email: '', emailOrPhone: '' })); }}
-                  keyboardType="email-address"
-                  error={errors.email}
-                />
+                {/* ── Carte principale ── */}
+                <View style={s.card}>
 
-                <View style={styles.dividerRow}>
-                  <View style={styles.dividerLine} />
-                  <Text style={styles.dividerText}>ou</Text>
-                  <View style={styles.dividerLine} />
+                  {/* ── ÉTAPE 1 : identité + contact ── */}
+                  {regStep === 1 && (
+                    <>
+                      <View style={s.cardTitleRow}>
+                        <View style={[s.cardTitleBadge, { backgroundColor: C.greenGlow }]}>
+                          <Text style={[s.cardTitleBadgeText, { color: C.green }]}>1 / 2</Text>
+                        </View>
+                        <Text style={s.cardTitle}>Informations personnelles</Text>
+                      </View>
+
+                      {/* Prénom + Nom côte à côte */}
+                      <View style={s.nameRow}>
+                        <View style={{ flex: 1 }}>
+                          <InputField
+                            iconName="user"
+                            placeholder="Prénom *"
+                            value={prenom}
+                            onChangeText={(v) => { setPrenom(v); setErrors(p => ({ ...p, prenom: '' })); }}
+                            error={errors.prenom}
+                            autoCapitalize="words"
+                          />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <InputField
+                            iconName="user"
+                            placeholder="Nom"
+                            value={nom}
+                            onChangeText={(v) => { setNom(v); setErrors(p => ({ ...p, nom: '' })); }}
+                            autoCapitalize="words"
+                          />
+                        </View>
+                      </View>
+
+                      {/* Toggle téléphone / e-mail */}
+                      <View style={s.toggleRow}>
+                        <TouchableOpacity
+                          style={[s.toggleBtn, regType === 'phone' && s.toggleBtnActive]}
+                          onPress={() => { setRegType('phone'); setEmail(''); setErrors(p => ({ ...p, contact: '' })); }}
+                        >
+                          <FontAwesome6 name="phone" size={12} color={regType === 'phone' ? C.green : C.textFaint} />
+                          <Text style={[s.toggleBtnText, regType === 'phone' && s.toggleBtnTextActive]}>Téléphone</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[s.toggleBtn, regType === 'email' && s.toggleBtnActive]}
+                          onPress={() => { setRegType('email'); setPhone(''); setErrors(p => ({ ...p, contact: '' })); }}
+                        >
+                          <FontAwesome6 name="envelope" size={12} color={regType === 'email' ? C.green : C.textFaint} />
+                          <Text style={[s.toggleBtnText, regType === 'email' && s.toggleBtnTextActive]}>E-mail</Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {regType === 'phone' ? (
+                        <InputField
+                          iconName="phone"
+                          placeholder="Numéro de téléphone"
+                          value={phone}
+                          onChangeText={(v) => { setPhone(v); setErrors(p => ({ ...p, contact: '' })); }}
+                          keyboardType="phone-pad"
+                          prefix="+216  "
+                          error={errors.contact}
+                          maxLength={8}
+                        />
+                      ) : (
+                        <InputField
+                          iconName="envelope"
+                          placeholder="Adresse e-mail"
+                          value={email}
+                          onChangeText={(v) => { setEmail(v); setErrors(p => ({ ...p, contact: '' })); }}
+                          keyboardType="email-address"
+                          error={errors.contact}
+                        />
+                      )}
+
+                      <TouchableOpacity
+                        style={[s.primaryBtn, !canStep1 && s.primaryBtnOff]}
+                        onPress={handleRegContinue}
+                        disabled={loading || !canStep1}
+                        activeOpacity={0.85}
+                      >
+                        <LinearGradient
+                          colors={canStep1 ? [C.green, C.greenDark] : ['#B0D8C8', '#9DC9B6']}
+                          start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                          style={s.primaryBtnGrad}
+                        >
+                          {loading
+                            ? <ActivityIndicator color="#fff" />
+                            : (
+                              <>
+                                <Text style={s.primaryBtnText}>Continuer</Text>
+                                <FontAwesome6 name="arrow-right" size={14} color="#fff" style={{ marginLeft: 8 }} />
+                              </>
+                            )
+                          }
+                        </LinearGradient>
+                      </TouchableOpacity>
+                    </>
+                  )}
+
+                  {/* ── ÉTAPE 2 : mot de passe ── */}
+                  {regStep === 2 && (
+                    <>
+                      <View style={s.cardTitleRow}>
+                        <View style={[s.cardTitleBadge, { backgroundColor: C.blueGlow }]}>
+                          <Text style={[s.cardTitleBadgeText, { color: C.blue }]}>2 / 2</Text>
+                        </View>
+                        <Text style={s.cardTitle}>Sécurisez votre compte</Text>
+                      </View>
+
+                      {/* Récapitulatif identité */}
+                      <View style={s.identitySummary}>
+                        <LinearGradient colors={[C.green, C.greenDark]} style={s.identityAvatar}>
+                          <Text style={s.identityAvatarText}>{prenom[0]?.toUpperCase() || '?'}</Text>
+                        </LinearGradient>
+                        <View>
+                          <Text style={s.identityName}>{prenom} {nom}</Text>
+                          <Text style={s.identityContact}>
+                            {regType === 'phone' ? `+216 ${phone}` : email}
+                          </Text>
+                        </View>
+                        <TouchableOpacity
+                          onPress={() => { setRegStep(1); setErrors({}); }}
+                          style={s.identityEditBtn}
+                          hitSlop={8}
+                        >
+                          <FontAwesome6 name="pen" size={12} color={C.green} />
+                          <Text style={s.identityEditText}>Modifier</Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      <InputField
+                        iconName="lock"
+                        placeholder="Mot de passe (min. 6 caractères)"
+                        value={password}
+                        onChangeText={(v) => { setPassword(v); setErrors(p => ({ ...p, password: '' })); }}
+                        secureTextEntry
+                        error={errors.password}
+                        autoFocus
+                      />
+                      <InputField
+                        iconName="lock"
+                        placeholder="Confirmer le mot de passe"
+                        value={confirm}
+                        onChangeText={(v) => { setConfirm(v); setErrors(p => ({ ...p, confirm: '' })); }}
+                        secureTextEntry
+                        error={errors.confirm}
+                      />
+
+                      <TouchableOpacity
+                        style={[s.primaryBtn, !canStep2 && s.primaryBtnOff]}
+                        onPress={handleRegContinue}
+                        disabled={loading || !canStep2}
+                        activeOpacity={0.85}
+                      >
+                        <LinearGradient
+                          colors={canStep2 ? [C.green, C.greenDark] : ['#B0D8C8', '#9DC9B6']}
+                          start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                          style={s.primaryBtnGrad}
+                        >
+                          {loading
+                            ? <ActivityIndicator color="#fff" />
+                            : <Text style={s.primaryBtnText}>S'inscrire</Text>
+                          }
+                        </LinearGradient>
+                      </TouchableOpacity>
+                    </>
+                  )}
                 </View>
 
-                <InputField
-                  iconName="phone"
-                  placeholder={t('login.phone')}
-                  value={phone}
-                  onChangeText={(v) => { setPhone(v); setErrors(p => ({ ...p, phone: '', emailOrPhone: '' })); }}
-                  keyboardType="phone-pad"
-                  prefix="+216  "
-                  error={errors.phone}
-                  maxLength={8}
-                />
+                {/* ── Options sociales (étape 1 uniquement) ── */}
+                {regStep === 1 && (
+                  <>
+                    <View style={s.divRow}>
+                      <View style={s.divLine} />
+                      <Text style={s.divText}>ou continuer avec</Text>
+                      <View style={s.divLine} />
+                    </View>
 
+                    <TouchableOpacity style={s.socialCard} onPress={handleFacebook} activeOpacity={0.82}>
+                      <View style={[s.socialIconBox, { backgroundColor: 'rgba(24,119,242,0.1)' }]}>
+                        <FontAwesome6 name="facebook" size={20} color={C.facebook} />
+                      </View>
+                      <Text style={s.socialCardText}>Facebook</Text>
+                      <FontAwesome6 name="chevron-right" size={11} color={C.textFaint} />
+                    </TouchableOpacity>
+
+                    <TouchableOpacity style={s.socialCard} onPress={handleGoogle} activeOpacity={0.82}>
+                      <View style={[s.socialIconBox, { backgroundColor: 'rgba(234,67,53,0.08)' }]}>
+                        <FontAwesome6 name="google" size={18} color={C.google} />
+                      </View>
+                      <Text style={s.socialCardText}>Google</Text>
+                      <FontAwesome6 name="chevron-right" size={11} color={C.textFaint} />
+                    </TouchableOpacity>
+
+                    {Platform.OS === 'ios' && (
+                      <TouchableOpacity style={s.socialCard} onPress={handleApple} activeOpacity={0.82}>
+                        <View style={[s.socialIconBox, { backgroundColor: 'rgba(0,0,0,0.06)' }]}>
+                          <FontAwesome6 name="apple" size={20} color={C.text} />
+                        </View>
+                        <Text style={s.socialCardText}>Apple</Text>
+                        <FontAwesome6 name="chevron-right" size={11} color={C.textFaint} />
+                      </TouchableOpacity>
+                    )}
+                  </>
+                )}
+
+                <Text style={s.termsText}>
+                  En t'inscrivant, tu acceptes nos{' '}
+                  <Text style={s.termsLink}>Conditions d'utilisation</Text>
+                  {' '}et notre{' '}
+                  <Text style={s.termsLink}>Politique de confidentialité</Text>.
+                </Text>
+
+              </Animated.View>
+            </ScrollView>
+          </KeyboardAvoidingView>
+
+          <View style={s.bottomBar}>
+            <Text style={s.bottomBarText}>Tu as déjà un compte ? </Text>
+            <TouchableOpacity onPress={() => goTo('login')}>
+              <Text style={s.bottomBarLink}>Se connecter</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </View>
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // LOGIN SCREEN
+  // ════════════════════════════════════════════════════════════════════════════
+  return (
+    <View style={s.container}>
+      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+        <View style={s.blobTopRight} />
+        <View style={s.blobBottomLeft} />
+      </View>
+
+      <SafeAreaView style={s.safe}>
+        <StatusBar style="dark" />
+
+        {/* ── Header ── */}
+        <View style={s.header}>
+          <TouchableOpacity onPress={() => goTo('register')} style={s.backBtn} activeOpacity={0.7}>
+            <FontAwesome6 name="arrow-left" size={18} color={C.text} />
+          </TouchableOpacity>
+          <LinearGradient colors={[C.green, C.greenDark]} style={s.headerLogo}>
+            <FontAwesome6 name="location-dot" size={15} color="#FFFFFF" />
+          </LinearGradient>
+          <Text style={s.headerAppName}>ByMap</Text>
+          <View style={{ flex: 1 }} />
+          <View style={[s.statusBadge, { backgroundColor: C.greenGlow }]}>
+            <View style={[s.statusDot, { backgroundColor: C.green }]} />
+            <Text style={[s.statusText, { color: C.green }]}>Sécurisé</Text>
+          </View>
+        </View>
+
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <ScrollView
+            contentContainerStyle={s.scroll}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+
+              <Text style={s.pageTitle}>Se connecter</Text>
+              <Text style={s.pageSubtitle}>Bon retour sur ByMap</Text>
+
+              {errors.global ? (
+                <View style={s.errGlobalBox}>
+                  <FontAwesome6 name="circle-exclamation" size={14} color={C.red} />
+                  <Text style={s.errGlobal}>{errors.global}</Text>
+                </View>
+              ) : null}
+
+              <View style={s.card}>
+                {/* Onglets Téléphone / E-mail */}
+                <View style={s.loginTabBar}>
+                  {[
+                    { key: 'phone', label: 'Téléphone', icon: 'phone' },
+                    { key: 'email', label: 'E-mail',    icon: 'envelope' },
+                  ].map((tab) => (
+                    <TouchableOpacity
+                      key={tab.key}
+                      style={[s.loginTabBtn, loginTab === tab.key && s.loginTabBtnActive]}
+                      onPress={() => { setLoginTab(tab.key); setErrors({}); }}
+                      activeOpacity={0.8}
+                    >
+                      <FontAwesome6
+                        name={tab.icon}
+                        size={13}
+                        color={loginTab === tab.key ? C.green : C.textFaint}
+                      />
+                      <Text style={[s.loginTabText, loginTab === tab.key && s.loginTabTextActive]}>
+                        {tab.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* Champ contact */}
+                {loginTab === 'phone' ? (
+                  <InputField
+                    iconName="phone"
+                    placeholder="Numéro de téléphone"
+                    value={phone}
+                    onChangeText={(v) => { setPhone(v); setErrors(p => ({ ...p, contact: '' })); }}
+                    keyboardType="phone-pad"
+                    prefix="+216  "
+                    error={errors.contact}
+                    maxLength={8}
+                  />
+                ) : (
+                  <InputField
+                    iconName="envelope"
+                    placeholder="Adresse e-mail"
+                    value={email}
+                    onChangeText={(v) => { setEmail(v); setErrors(p => ({ ...p, contact: '' })); }}
+                    keyboardType="email-address"
+                    error={errors.contact}
+                  />
+                )}
+
+                {/* Mot de passe */}
                 <InputField
                   iconName="lock"
-                  placeholder={t('login.password')}
+                  placeholder="Mot de passe"
                   value={password}
                   onChangeText={(v) => { setPassword(v); setErrors(p => ({ ...p, password: '' })); }}
                   secureTextEntry
                   error={errors.password}
                 />
 
-                <TouchableOpacity style={styles.forgotBtn} activeOpacity={0.7} onPress={() => navigation.navigate('ForgetPassword')}>
-                  <Text style={styles.forgotText}>{t('login.forgotPassword')}</Text>
+                {/* Enregistrer connexion */}
+                <TouchableOpacity style={s.checkRow} onPress={() => setSaveLogin(!saveLogin)} activeOpacity={0.7}>
+                  <View style={[s.checkbox, saveLogin && s.checkboxOn]}>
+                    {saveLogin && <FontAwesome6 name="check" size={9} color="#fff" />}
+                  </View>
+                  <Text style={s.checkText}>
+                    Mémoriser mes informations de connexion
+                  </Text>
                 </TouchableOpacity>
 
+                {/* Bouton connexion */}
                 <TouchableOpacity
-                  style={[styles.primaryBtn, loading && { opacity: 0.7 }]}
+                  style={[s.primaryBtn, !canLogin && s.primaryBtnOff]}
                   onPress={handleLogin}
-                  disabled={loading}
-                  activeOpacity={0.88}
+                  disabled={loading || !canLogin}
+                  activeOpacity={0.85}
                 >
-                  {loading
-                    ? <ActivityIndicator color="#FFFFFF" />
-                    : <Text style={styles.primaryBtnText}>{t('login.loginBtn')}</Text>
-                  }
+                  <LinearGradient
+                    colors={canLogin ? [C.green, C.greenDark] : ['#B0D8C8', '#9DC9B6']}
+                    start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                    style={s.primaryBtnGrad}
+                  >
+                    {loading
+                      ? <ActivityIndicator color="#fff" />
+                      : <Text style={s.primaryBtnText}>Se connecter</Text>
+                    }
+                  </LinearGradient>
                 </TouchableOpacity>
-              </Animated.View>
-            )}
 
-            {/* ── Formulaire SIGNUP ── */}
-            {tab === 'signup' && (
-              <Animated.View style={[styles.form, { opacity: fadeAnim }]}>
-                <InputField
-                  iconName="user"
-                  placeholder={t('login.lastName')}
-                  value={name}
-                  onChangeText={(v) => { setName(v); setErrors(p => ({ ...p, name: '' })); }}
-                  error={errors.name}
-                />
-                <InputField
-                  iconName="user"
-                  placeholder={t('login.firstName')}
-                  value={prenom}
-                  onChangeText={(v) => { setPrenom(v); setErrors(p => ({ ...p, prenom: '' })); }}
-                  error={errors.prenom}
-                />
-                <InputField
-                  iconName="envelope"
-                  placeholder={t('login.email')}
-                  value={email}
-                  onChangeText={(v) => { setEmail(v); setErrors(p => ({ ...p, email: '' })); }}
-                  keyboardType="email-address"
-                  error={errors.email}
-                />
-                <InputField
-                  iconName="phone"
-                  placeholder={t('login.phone')}
-                  value={phone}
-                  onChangeText={(v) => { setPhone(v); setErrors(p => ({ ...p, phone: '' })); }}
-                  keyboardType="phone-pad"
-                  prefix="+216  "
-                  error={errors.phone}
-                  maxLength={8}
-                />
-                <InputField
-                  iconName="lock"
-                  placeholder={t('login.passwordMin')}
-                  value={password}
-                  onChangeText={(v) => { setPassword(v); setErrors(p => ({ ...p, password: '' })); }}
-                  secureTextEntry
-                  error={errors.password}
-                />
-                <InputField
-                  iconName="lock"
-                  placeholder={t('login.confirmPassword')}
-                  value={confirm}
-                  onChangeText={(v) => { setConfirm(v); setErrors(p => ({ ...p, confirm: '' })); }}
-                  secureTextEntry
-                  error={errors.confirm}
-                />
-                <TouchableOpacity
-                  style={[styles.primaryBtn, loading && { opacity: 0.7 }]}
-                  onPress={handleSignUp}
-                  disabled={loading}
-                  activeOpacity={0.88}
-                >
-                  {loading
-                    ? <ActivityIndicator color="#FFFFFF" />
-                    : <Text style={styles.primaryBtnText}>{t('login.registerBtn')}</Text>
-                  }
+                <TouchableOpacity style={s.forgotBtn} onPress={() => navigation.navigate('ForgetPassword')}>
+                  <Text style={s.forgotText}>Mot de passe oublié ?</Text>
                 </TouchableOpacity>
-              </Animated.View>
-            )}
+              </View>
 
-            {/* Séparateur social */}
-            <View style={styles.socialDivider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>{t('login.continueWith')}</Text>
-              <View style={styles.dividerLine} />
-            </View>
+              {/* Séparateur social */}
+              <View style={s.divRow}>
+                <View style={s.divLine} />
+                <Text style={s.divText}>ou continuer avec</Text>
+                <View style={s.divLine} />
+              </View>
 
-            {/* Boutons sociaux */}
-            <View style={styles.socialGrid}>
-              <SocialBtn label="Google"   faIcon="google"    iconColor={C.google}   onPress={handleGoogle} />
-              <SocialBtn label="Facebook" faIcon="facebook"  iconColor={C.facebook} onPress={handleFacebook} />
-              <SocialBtn label="Apple"    faIcon="apple"     iconColor={C.apple}    onPress={handleApple} />
-            </View>
+              <TouchableOpacity style={s.socialCard} onPress={handleFacebook} activeOpacity={0.82}>
+                <View style={[s.socialIconBox, { backgroundColor: 'rgba(24,119,242,0.1)' }]}>
+                  <FontAwesome6 name="facebook" size={20} color={C.facebook} />
+                </View>
+                <Text style={s.socialCardText}>Facebook</Text>
+                <FontAwesome6 name="chevron-right" size={11} color={C.textFaint} />
+              </TouchableOpacity>
 
+              <TouchableOpacity style={s.socialCard} onPress={handleGoogle} activeOpacity={0.82}>
+                <View style={[s.socialIconBox, { backgroundColor: 'rgba(234,67,53,0.08)' }]}>
+                  <FontAwesome6 name="google" size={18} color={C.google} />
+                </View>
+                <Text style={s.socialCardText}>Google</Text>
+                <FontAwesome6 name="chevron-right" size={11} color={C.textFaint} />
+              </TouchableOpacity>
+
+              {Platform.OS === 'ios' && (
+                <TouchableOpacity style={s.socialCard} onPress={handleApple} activeOpacity={0.82}>
+                  <View style={[s.socialIconBox, { backgroundColor: 'rgba(0,0,0,0.06)' }]}>
+                    <FontAwesome6 name="apple" size={20} color={C.text} />
+                  </View>
+                  <Text style={s.socialCardText}>Apple</Text>
+                  <FontAwesome6 name="chevron-right" size={11} color={C.textFaint} />
+                </TouchableOpacity>
+              )}
+
+            </Animated.View>
           </ScrollView>
         </KeyboardAvoidingView>
+
+        <View style={s.bottomBar}>
+          <Text style={s.bottomBarText}>Pas encore de compte ? </Text>
+          <TouchableOpacity onPress={() => goTo('register')}>
+            <Text style={s.bottomBarLink}>S'inscrire</Text>
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
     </View>
   );
 }
 
-// ─── Styles — thème clair mint ────────────────────────────────────────────────
-const styles = StyleSheet.create({
-  safe:   { flex: 1, backgroundColor: 'transparent' },
-  flex:   { flex: 1 },
-  scroll: { flexGrow: 1, paddingHorizontal: 24, paddingBottom: 48 },
+// ── Styles ────────────────────────────────────────────────────────────────────
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: C.bg },
+  safe:      { flex: 1, backgroundColor: 'transparent' },
+  scroll:    { paddingHorizontal: 16, paddingBottom: 32 },
 
-  // Background blobs
+  // Blobs décoratifs (identiques à LocalScreen)
   blobTopRight: {
     position: 'absolute', top: -80, right: -80,
     width: 280, height: 280, borderRadius: 999,
-    backgroundColor: 'rgba(45,189,126,0.12)',
+    backgroundColor: 'rgba(45,189,126,0.10)',
   },
   blobBottomLeft: {
     position: 'absolute', bottom: -60, left: -70,
     width: 240, height: 240, borderRadius: 999,
-    backgroundColor: 'rgba(59,126,246,0.08)',
+    backgroundColor: 'rgba(59,126,246,0.07)',
   },
 
-  // Header
-  header: { flexDirection: 'row', alignItems: 'center', marginTop: 16, marginBottom: 8, gap: 12 },
-  backBtn: {},
-  backCircle: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: '#F3F4F6',
-    borderWidth: 1, borderColor: '#E5E7EB',
+  // ── Header (calqué sur LocalScreen header)
+  header: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 14, paddingVertical: 12,
+    backgroundColor: C.white,
+    borderBottomWidth: 1, borderBottomColor: '#F0F0F0',
+    gap: 10,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06, shadowRadius: 8, elevation: 4,
+  },
+  headerLogo: {
+    width: 36, height: 36, borderRadius: 12,
     justifyContent: 'center', alignItems: 'center',
   },
-  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  brandName: { fontSize: 20, fontWeight: '800', color: '#1A1A2E', letterSpacing: -0.3 },
-
-  // Tabs
-  tabBar: {
-    flexDirection: 'row', backgroundColor: '#FFFFFF',
-    borderRadius: 16, padding: 4, marginBottom: 24,
-    borderWidth: 1, borderColor: '#E5E7EB',
-    position: 'relative', overflow: 'hidden',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06, shadowRadius: 8, elevation: 3,
+  headerAppName: { fontSize: 18, fontWeight: '800', color: C.text, letterSpacing: -0.3 },
+  headerCloseBtn: {
+    width: 34, height: 34, borderRadius: 10,
+    backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: C.border,
+    justifyContent: 'center', alignItems: 'center',
   },
-  tabIndicatorWrapper: {
-    position: 'absolute', top: 4, bottom: 4, width: '48%', borderRadius: 13, overflow: 'hidden',
+  backBtn: {
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: C.border,
+    justifyContent: 'center', alignItems: 'center',
   },
-  tabIndicator: {
-    flex: 1, borderRadius: 13,
-    backgroundColor: '#2DBD7E',
-    shadowColor: '#2DBD7E', shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3, shadowRadius: 8, elevation: 4,
+  statusBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20,
   },
-  tabBtn:        { flex: 1, paddingVertical: 12, alignItems: 'center', zIndex: 2 },
-  tabText:       { fontSize: 14, fontWeight: '700', color: '#9CA3AF' },
-  tabTextActive: { color: '#FFFFFF' },
+  statusDot:  { width: 7, height: 7, borderRadius: 4 },
+  statusText: { fontSize: 12, fontWeight: '700' },
 
-  // Form
-  form: { gap: 12, marginBottom: 8 },
+  // ── Titres
+  pageTitle: {
+    fontSize: 26, fontWeight: '800', color: C.text,
+    letterSpacing: -0.4, marginTop: 28, marginBottom: 4, marginLeft: 2,
+  },
+  pageSubtitle: {
+    fontSize: 14, color: C.textDim, marginBottom: 20, marginLeft: 2,
+  },
 
-  // Input group
-  inputGroup: { gap: 4 },
+  // ── Indicateur de progression (étapes inscription)
+  progressRow: {
+    flexDirection: 'row', alignItems: 'center',
+    marginBottom: 20, marginLeft: 2,
+  },
+  progressDot: {
+    width: 12, height: 12, borderRadius: 6,
+    backgroundColor: C.border, borderWidth: 2, borderColor: C.border,
+  },
+  progressDotActive: { backgroundColor: C.green, borderColor: C.green },
+  progressLine: { flex: 1, height: 3, backgroundColor: C.border, marginHorizontal: 6, borderRadius: 2 },
+  progressLineActive: { backgroundColor: C.green },
+
+  // ── Carte blanche (même style que card LocalScreen)
+  card: {
+    backgroundColor: C.card,
+    borderRadius: 20, borderWidth: 1, borderColor: '#F0F0F0',
+    padding: 18, marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.07, shadowRadius: 16, elevation: 4,
+    gap: 4,
+  },
+  cardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
+  cardTitleBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  cardTitleBadgeText: { fontSize: 11, fontWeight: '800' },
+  cardTitle: { fontSize: 15, fontWeight: '700', color: C.text },
+
+  // ── Champs prénom + nom côte à côte
+  nameRow: { flexDirection: 'row', gap: 10, marginBottom: 4 },
+
+  // ── Toggle téléphone / e-mail
+  toggleRow: {
+    flexDirection: 'row', gap: 8, marginBottom: 8,
+    padding: 4, backgroundColor: '#F3F4F6', borderRadius: 12,
+  },
+  toggleBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 6, paddingVertical: 8, borderRadius: 10,
+  },
+  toggleBtnActive:     { backgroundColor: C.white, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 4, elevation: 2 },
+  toggleBtnText:       { fontSize: 13, fontWeight: '600', color: C.textFaint },
+  toggleBtnTextActive: { color: C.green },
+
+  // ── Champs de saisie
+  inputGroup: { gap: 3 },
   inputWrap: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#F8FAFB',
-    borderRadius: 14, borderWidth: 1.5, borderColor: '#E5E7EB',
-    paddingHorizontal: 14, paddingVertical: 2, minHeight: 52,
+    backgroundColor: C.inputBg,
+    borderRadius: 14, borderWidth: 1.5, borderColor: C.border,
+    paddingHorizontal: 12, paddingVertical: 2, minHeight: 50,
   },
-  inputWrapError: { backgroundColor: 'rgba(239,68,68,0.06)' },
-  inputIconLeft:  { marginRight: 10 },
-  inputIconRight: { marginLeft: 8, padding: 4 },
-  inputPrefix:    { fontSize: 14, color: '#2DBD7E', fontWeight: '700', marginRight: 4 },
-  inputText:      { flex: 1, fontSize: 15, color: '#1A1A2E', paddingVertical: 12 },
-  errText:        { fontSize: 12, color: '#EF4444', marginLeft: 4, marginTop: 2 },
+  inputWrapFocused: { borderColor: C.green, backgroundColor: 'rgba(45,189,126,0.04)' },
+  inputWrapError:   { borderColor: C.red,   backgroundColor: 'rgba(239,68,68,0.04)' },
+  inputIconLeft:    { marginRight: 9 },
+  inputIconRight:   { marginLeft: 8, padding: 4 },
+  inputPrefix:      { fontSize: 14, color: C.green, fontWeight: '700', marginRight: 4 },
+  inputText:        { flex: 1, fontSize: 15, color: C.text, paddingVertical: 12 },
+  errText:          { fontSize: 12, color: C.red, marginLeft: 4 },
 
-  // Global error
-  globalErrBox: {
-    flexDirection: 'row', alignItems: 'center',
+  // ── Erreur globale
+  errGlobalBox: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
     backgroundColor: 'rgba(239,68,68,0.08)', borderRadius: 12, padding: 12,
-    borderWidth: 1, borderColor: 'rgba(239,68,68,0.20)',
+    borderWidth: 1, borderColor: 'rgba(239,68,68,0.20)', marginBottom: 16,
   },
-  globalErrText: { fontSize: 13, color: '#EF4444', fontWeight: '500', flex: 1 },
+  errGlobal: { flex: 1, fontSize: 13, color: C.red, fontWeight: '500' },
 
-  // Dividers
-  dividerRow:    { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 4 },
-  socialDivider: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 24, marginBottom: 16 },
-  dividerLine:   { flex: 1, height: 1, backgroundColor: '#E5E7EB' },
-  dividerText:   { fontSize: 13, color: '#9CA3AF', fontWeight: '500' },
+  // ── Récapitulatif identité (étape 2 inscription)
+  identitySummary: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: C.greenGlow, borderRadius: 14,
+    padding: 12, marginBottom: 12,
+    borderWidth: 1, borderColor: 'rgba(45,189,126,0.20)',
+  },
+  identityAvatar: {
+    width: 42, height: 42, borderRadius: 21,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  identityAvatarText: { color: '#fff', fontWeight: '800', fontSize: 17 },
+  identityName:       { fontSize: 15, fontWeight: '700', color: C.text },
+  identityContact:    { fontSize: 12, color: C.textDim, marginTop: 1 },
+  identityEditBtn:    { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 4 },
+  identityEditText:   { fontSize: 12, color: C.green, fontWeight: '600' },
 
-  // Forgot
-  forgotBtn:  { alignSelf: 'flex-end', marginTop: -4 },
-  forgotText: { fontSize: 13, color: '#2DBD7E', fontWeight: '600' },
-
-  // Primary button
-  primaryBtn: {
-    borderRadius: 14, paddingVertical: 16, marginTop: 8,
-    alignItems: 'center', backgroundColor: '#2DBD7E',
-    shadowColor: '#2DBD7E', shadowOffset: { width: 0, height: 6 },
+  // ── Bouton principal avec dégradé
+  primaryBtn: { borderRadius: 16, marginTop: 10, overflow: 'hidden' },
+  primaryBtnOff: { opacity: 0.7 },
+  primaryBtnGrad: {
+    flexDirection: 'row', justifyContent: 'center', alignItems: 'center',
+    paddingVertical: 15,
+    shadowColor: C.green, shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.35, shadowRadius: 12, elevation: 6,
   },
-  primaryBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', letterSpacing: 1.2 },
+  primaryBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', letterSpacing: 0.5 },
 
-  // Social
-  socialGrid: { flexDirection: 'row', gap: 10 },
-  socialBtn: {
-    flex: 1, flexDirection: 'column', alignItems: 'center',
-    justifyContent: 'center', paddingVertical: 14, borderRadius: 14, gap: 6,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1, borderColor: '#E5E7EB',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06, shadowRadius: 4, elevation: 2,
+  // ── Onglets connexion (Téléphone / E-mail)
+  loginTabBar: {
+    flexDirection: 'row', gap: 8,
+    padding: 4, backgroundColor: '#F3F4F6', borderRadius: 14,
+    marginBottom: 14,
   },
-  socialLabel: { fontSize: 11, fontWeight: '600', color: '#4B5563' },
+  loginTabBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 7, paddingVertical: 9, borderRadius: 11,
+  },
+  loginTabBtnActive: {
+    backgroundColor: C.white,
+    shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 4, elevation: 2,
+  },
+  loginTabText:       { fontSize: 13, fontWeight: '600', color: C.textFaint },
+  loginTabTextActive: { color: C.text, fontWeight: '700' },
 
-  // ── Vérification email ────────────────────────────────────────────────────
-  verifyHeader: { alignItems: 'center', marginTop: 60, marginBottom: 40 },
-  verifyIconWrap: {
-    width: 80, height: 80, borderRadius: 40,
-    backgroundColor: 'rgba(45,189,126,0.12)',
+  // ── Checkbox
+  checkRow:   { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 },
+  checkbox:   {
+    width: 20, height: 20, borderRadius: 6,
+    borderWidth: 1.5, borderColor: C.green,
+    justifyContent: 'center', alignItems: 'center', flexShrink: 0,
+  },
+  checkboxOn: { backgroundColor: C.green },
+  checkText:  { flex: 1, fontSize: 13, color: C.textDim },
+
+  // ── Mot de passe oublié
+  forgotBtn:  { marginTop: 14, alignItems: 'center' },
+  forgotText: { fontSize: 13, color: C.green, fontWeight: '600' },
+
+  // ── Divider
+  divRow:  { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
+  divLine: { flex: 1, height: 1, backgroundColor: C.border },
+  divText: { fontSize: 12, color: C.textFaint, fontWeight: '500', whiteSpace: 'nowrap' },
+
+  // ── Cartes sociales (même style que card LocalScreen mais compact)
+  socialCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    backgroundColor: C.card,
+    borderRadius: 16, borderWidth: 1, borderColor: '#F0F0F0',
+    padding: 14, marginBottom: 10,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
+  },
+  socialIconBox: {
+    width: 40, height: 40, borderRadius: 12,
     justifyContent: 'center', alignItems: 'center',
-    marginBottom: 20,
-    shadowColor: '#2DBD7E', shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2, shadowRadius: 12, elevation: 4,
   },
-  verifyTitle: {
-    fontSize: 22, fontWeight: '800', color: '#1A1A2E',
-    marginBottom: 10, letterSpacing: -0.3,
-  },
-  verifySubtitle: {
-    fontSize: 14, color: '#4B5563', textAlign: 'center', lineHeight: 22,
-  },
+  socialCardText: { flex: 1, fontSize: 15, fontWeight: '600', color: C.text },
 
-  // OTP
-  otpRow: { flexDirection: 'row', justifyContent: 'center', gap: 10, marginBottom: 8 },
-  otpBox: {
-    width: 46, height: 58, borderRadius: 14,
-    borderWidth: 2, borderColor: '#E5E7EB',
-    backgroundColor: '#FFFFFF', fontSize: 22, fontWeight: '800',
-    color: '#1A1A2E', textAlign: 'center',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06, shadowRadius: 4, elevation: 2,
+  // ── Conditions d'utilisation
+  termsText: {
+    fontSize: 11, color: C.textFaint, textAlign: 'center',
+    marginTop: 20, lineHeight: 17,
   },
-  otpBoxFilled: {
-    borderColor: '#2DBD7E', backgroundColor: 'rgba(45,189,126,0.08)',
-  },
-  otpBoxError: { borderColor: '#EF4444', backgroundColor: 'rgba(239,68,68,0.06)' },
+  termsLink: { color: C.blue },
 
-  verifyError: {
-    fontSize: 13, color: '#EF4444', textAlign: 'center',
-    marginBottom: 12, fontWeight: '500',
+  // ── Barre du bas
+  bottomBar: {
+    flexDirection: 'row', justifyContent: 'center', alignItems: 'center',
+    borderTopWidth: 1, borderTopColor: '#F0F0F0',
+    paddingVertical: 16, backgroundColor: C.white,
   },
-
-  // Resend
-  resendRow:      { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 20 },
-  resendLabel:    { fontSize: 13, color: '#9CA3AF' },
-  resendLink:     { fontSize: 13, color: '#2DBD7E', fontWeight: '700' },
-  resendDisabled: { color: '#D1D5DB' },
+  bottomBarText: { fontSize: 14, color: C.textDim },
+  bottomBarLink: { fontSize: 14, fontWeight: '800', color: C.green },
 });

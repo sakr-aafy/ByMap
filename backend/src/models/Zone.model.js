@@ -7,6 +7,7 @@ const ZoneSchema = new mongoose.Schema(
     gouvernorat: { type: String, trim: true, default: '' },
     ville:       { type: String, trim: true, default: '' },
     description: { type: String, trim: true, default: '' },
+    categorie:   { type: String, trim: true, default: '' },
     lat:         { type: Number, required: true },
     lng:         { type: Number, required: true },
     active:      { type: Boolean, default: true },

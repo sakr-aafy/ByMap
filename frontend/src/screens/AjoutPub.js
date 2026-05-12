@@ -229,6 +229,38 @@ const Field = ({ label, iconName, accent, children }) => (
 
 const emptyLoc = () => ({ ville: '', gouvernorat: '', delegation: '' });
 
+// Résout un nom de zone (gouvernorat / délégation / localité) → { ville, gouvernorat, delegation }
+function resolveZone(zoneName) {
+  if (!zoneName) return emptyLoc();
+  const z = zoneName.trim();
+  const zL = z.toLowerCase();
+
+  // 1. Correspondance exacte sur un gouvernorat
+  const exactGov = Object.keys(TUNISIA).find(k => k.toLowerCase() === zL);
+  if (exactGov) return { ville: exactGov, gouvernorat: '', delegation: '' };
+
+  // 2. Correspondance sur une délégation
+  for (const [gov, places] of Object.entries(TUNISIA)) {
+    const delegs = [...new Set(places.map(p => p.delegation).filter(Boolean))];
+    const d = delegs.find(d => d.toLowerCase() === zL);
+    if (d) return { ville: gov, gouvernorat: d, delegation: '' };
+  }
+
+  // 3. Correspondance sur une localité
+  for (const [gov, places] of Object.entries(TUNISIA)) {
+    const p = places.find(p => p.localite?.toLowerCase() === zL);
+    if (p) return { ville: gov, gouvernorat: p.delegation || '', delegation: p.localite || '' };
+  }
+
+  // 4. Correspondance partielle sur gouvernorat
+  const partialGov = Object.keys(TUNISIA).find(k =>
+    k.toLowerCase().includes(zL) || zL.includes(k.toLowerCase())
+  );
+  if (partialGov) return { ville: partialGov, gouvernorat: '', delegation: '' };
+
+  return emptyLoc();
+}
+
 // ── Écran principal ────────────────────────────────────────────────────────────
 export default function AjoutePub() {
   const navigation = useNavigation();
@@ -239,18 +271,21 @@ export default function AjoutePub() {
     ? route.params.mode
     : 'local';
 
+  // Localisation pré-remplie depuis la zone de LocalScreen
+  const initialLoc = resolveZone(route.params?.zoneName);
+
   const [mode,    setMode]    = useState(initialMode);
   const [desc,    setDesc]    = useState('');
   const [media,   setMedia]   = useState([]);
   const [loading, setLoading] = useState(false);
-  const [loc,      setLoc]      = useState(emptyLoc());
-  const [locDebut, setLocDebut] = useState(emptyLoc());
+  const [loc,      setLoc]      = useState(initialLoc);
+  const [locDebut, setLocDebut] = useState(initialLoc);
   const [locFin,   setLocFin]   = useState(emptyLoc());
 
   const accent    = mode === 'duo' ? C.blue : C.green;
   const accentGlow = mode === 'duo' ? C.blueGlow : C.greenGlow;
 
-  const handleModeChange = (m) => { setMode(m); setLoc(emptyLoc()); setLocDebut(emptyLoc()); setLocFin(emptyLoc()); };
+  const handleModeChange = (m) => { setMode(m); setLoc(initialLoc); setLocDebut(initialLoc); setLocFin(emptyLoc()); };
   const canSubmit = desc.trim().length > 0 && !loading;
 
   const handleSubmit = async () => {

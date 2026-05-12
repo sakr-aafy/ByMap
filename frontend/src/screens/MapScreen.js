@@ -474,6 +474,106 @@ window.addZoneDots = function(dots) {
   });
 };
 
+// ── Icônes SVG par catégorie — Zones admin ───────────────────────────────────
+// Normalise : supprime accents + minuscules  →  "Université" → "universite"
+function normCat(s) {
+  return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+}
+
+// Icônes SVG inline (viewBox 0 0 24 24, fill currentColor) — pas de CDN requis
+var ZONE_ICONS = {
+  hotel: {
+    color: '#8B5CF6',
+    svg: '<rect fill="currentColor" x="2" y="16" width="20" height="3" rx="1.5"/>' +
+         '<rect fill="currentColor" x="2" y="5" width="3" height="13" rx="1.5"/>' +
+         '<rect fill="currentColor" x="5" y="10" width="17" height="9" rx="2"/>' +
+         '<rect fill="currentColor" x="6" y="7" width="5" height="5" rx="1"/>' +
+         '<rect fill="currentColor" x="13" y="7" width="5" height="5" rx="1"/>',
+  },
+  sante: {
+    color: '#EF4444',
+    svg: '<rect fill="currentColor" x="10" y="3" width="4" height="18" rx="2"/>' +
+         '<rect fill="currentColor" x="3" y="10" width="18" height="4" rx="2"/>',
+  },
+  universite: {
+    color: '#3B7EF6',
+    svg: '<polygon fill="currentColor" points="12,4 23,9.5 12,15 1,9.5"/>' +
+         '<path fill="currentColor" d="M6,13 L6,18 Q6,21 12,21 Q18,21 18,18 L18,13 L12,16 Z"/>',
+  },
+  restaurant: {
+    color: '#F59E0B',
+    svg: '<rect fill="currentColor" x="6" y="3" width="1.5" height="8" rx="0.75"/>' +
+         '<rect fill="currentColor" x="8" y="3" width="1.5" height="8" rx="0.75"/>' +
+         '<rect fill="currentColor" x="10" y="3" width="1.5" height="8" rx="0.75"/>' +
+         '<rect fill="currentColor" x="7.5" y="11" width="2" height="10" rx="1"/>' +
+         '<path fill="currentColor" d="M15,3 L18,3 Q20,5 20,9 L15,9 Z"/>' +
+         '<rect fill="currentColor" x="15" y="9" width="2.5" height="12" rx="1.25"/>',
+  },
+  commerce: {
+    color: '#14B8A6',
+    svg: '<path fill="currentColor" d="M2,10 L5,3 L19,3 L22,10 Z"/>' +
+         '<rect fill="currentColor" x="3" y="10" width="18" height="12" rx="1"/>',
+  },
+  parc: {
+    color: '#22C55E',
+    svg: '<path fill="currentColor" d="M12,2 L22,16 L17,16 L17,21 L7,21 L7,16 L2,16 Z"/>',
+  },
+  musee: {
+    color: '#D97706',
+    svg: '<polygon fill="currentColor" points="1,9 23,9 12,3"/>' +
+         '<rect fill="currentColor" x="2" y="9" width="3" height="11"/>' +
+         '<rect fill="currentColor" x="7.5" y="9" width="3" height="11"/>' +
+         '<rect fill="currentColor" x="13.5" y="9" width="3" height="11"/>' +
+         '<rect fill="currentColor" x="19" y="9" width="3" height="11"/>' +
+         '<rect fill="currentColor" x="1" y="20" width="22" height="3" rx="1"/>',
+  },
+  sport: {
+    color: '#6366F1',
+    svg: '<rect fill="currentColor" x="1" y="9" width="4" height="6" rx="1.5"/>' +
+         '<rect fill="currentColor" x="19" y="9" width="4" height="6" rx="1.5"/>' +
+         '<rect fill="currentColor" x="2.5" y="7" width="3" height="10" rx="1"/>' +
+         '<rect fill="currentColor" x="18.5" y="7" width="3" height="10" rx="1"/>' +
+         '<rect fill="currentColor" x="5.5" y="11" width="13" height="2" rx="1"/>',
+  },
+  autre: {
+    color: '#6B7280',
+    svg: '<circle fill="currentColor" cx="5" cy="12" r="2.5"/>' +
+         '<circle fill="currentColor" cx="12" cy="12" r="2.5"/>' +
+         '<circle fill="currentColor" cx="19" cy="12" r="2.5"/>',
+  },
+};
+
+var adminZoneLayer = L.layerGroup().addTo(map);
+window.addAdminZones = function(zones) {
+  adminZoneLayer.clearLayers();
+  zones.forEach(function(z) {
+    var cat = normCat(z.categorie);
+    var cfg = ZONE_ICONS[cat] || ZONE_ICONS['autre'];
+    var iconHtml =
+      '<div style="width:4px;height:4px;border-radius:50%;background:#fff;' +
+      'border:2.5px solid ' + cfg.color + ';' +
+      'box-shadow:0 2px 10px rgba(0,0,0,0.22);cursor:pointer;position:relative;">' +
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" ' +
+      'color="' + cfg.color + '" ' +
+      'style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none;">' +
+      cfg.svg + '</svg></div>';
+    var icon = L.divIcon({
+      className: '',
+      html: iconHtml,
+      iconSize: [10, 10],
+      iconAnchor: [5, 5],
+    });
+    var m = L.marker([z.lat, z.lng], { icon: icon });
+    var tip = '<b style="color:#1A1A2E">' + z.name + '</b>';
+    if (z.categorie) tip += '<br/><span style="color:' + cfg.color + ';font-size:11px">&#9679; ' + z.categorie + '</span>';
+    m.bindTooltip(tip, { direction: 'top', offset: [0, -20] });
+    m.on('click', function() {
+      window.ReactNativeWebView.postMessage('ADMIN_ZONE:' + z.lat.toFixed(5) + ':' + z.lng.toFixed(5) + ':' + (z.name || ''));
+    });
+    adminZoneLayer.addLayer(m);
+  });
+};
+
 window.ReactNativeWebView.postMessage('READY');
 </script>
 </body>
@@ -610,6 +710,19 @@ export default function MapScreen() {
     } finally {
       zoneFetchRunning = false;
       setRefreshingDots(false);
+    }
+  };
+
+  const fetchAndInjectAdminZones = async () => {
+    try {
+      const res  = await fetch(`${API_URL}/zones`);
+      const data = await res.json();
+      const zones = (data.zones || []).filter(z => z.lat != null && z.lng != null);
+      if (webViewRef.current) {
+        webViewRef.current.injectJavaScript(`addAdminZones(${JSON.stringify(zones)}); true;`);
+      }
+    } catch (e) {
+      console.error('[ADMIN ZONES]', e);
     }
   };
 
@@ -805,10 +918,11 @@ export default function MapScreen() {
 
   // startLocationTracking supprimé
 
-  // Injecter les points verts quand la carte est prête (une seule fois)
+  // Injecter les points quand la carte est prête (une seule fois)
   useEffect(() => {
     if (!ready || mode !== 'map') return;
     fetchAndInjectZoneDots();
+    fetchAndInjectAdminZones();
   }, [ready, mode]);
 
   // Pull-to-refresh : glisser vers le bas depuis le haut de la carte
@@ -882,6 +996,15 @@ export default function MapScreen() {
         const c = pickedCenter || mapCenter || DEFAULT_COORDS;
         detectZoneFromCoords(c.latitude, c.longitude);
       }
+      return;
+    }
+    // ── Clic sur point bleu — zone admin ─────────────────────────────────
+    if (msg.startsWith('ADMIN_ZONE:')) {
+      const raw  = msg.slice('ADMIN_ZONE:'.length);
+      const sep1 = raw.indexOf(':');
+      const sep2 = raw.indexOf(':', sep1 + 1);
+      const zoneName = sep2 >= 0 ? raw.slice(sep2 + 1) : '';
+      if (zoneName) navigation.navigate('Local', { zone: zoneName });
       return;
     }
     // ── Radio Garden : clic sur point vert dans la carte Leaflet ──────────

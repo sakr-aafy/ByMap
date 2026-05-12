@@ -24,6 +24,7 @@ import ForgetPassword     from './src/screens/ForgetPassword';
 import ConversationsList  from './src/screens/ConversationsList';
 import DuoScreen          from './src/screens/DuoScreen';
 import FavoritesScreen    from './src/screens/FavoritesScreen';
+import WelcomeNewUser    from './src/screens/WelcomeNewUser';
 
 // ── Global incoming-call overlay (visible from any screen) ────────────────────
 function IncomingCallOverlay() {
@@ -95,6 +96,7 @@ export default function App() {
           <Stack.Screen name="ConversationsList" component={ConversationsList}/>
           <Stack.Screen name="Duo"              component={DuoScreen}        />
           <Stack.Screen name="Favorites"        component={FavoritesScreen}  />
+          <Stack.Screen name="WelcomeNew"       component={WelcomeNewUser}   />
         </Stack.Navigator>
 
         {/* Shown on top of any screen when a call arrives */}

@@ -1,4 +1,5 @@
 // server.js — Point d'entrée principal ByMap Backend
+require('dns').setDefaultResultOrder('ipv4first'); // Render ne supporte pas IPv6
 const express    = require('express');
 const cors       = require('cors');
 const helmet     = require('helmet');

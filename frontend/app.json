@@ -39,7 +39,11 @@
         "ACCESS_FINE_LOCATION",
         "RECORD_AUDIO",
         "CAMERA",
-        "MODIFY_AUDIO_SETTINGS"
+        "MODIFY_AUDIO_SETTINGS",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ]
     },
     "web": {
@@ -57,6 +61,11 @@
       "expo-video",
       "expo-web-browser",
       "expo-audio"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "f4bfa777-8c91-437f-b037-c8db0ef5eb8d"
+      }
+    }
   }
 }

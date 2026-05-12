@@ -1,94 +1,73 @@
-// src/screens/AdminDashboard.js
+// src/screens/admin/AdminDashboard.js
 import React, { useState, useEffect, useCallback } from 'react';
+import { FontAwesome6 } from '@expo/vector-icons';
 import {
-  StyleSheet,
-  View,
-  Text,
-  TouchableOpacity,
-  ScrollView,
-  Dimensions,
-  Alert,
-  Modal,
-  TextInput,
-  KeyboardAvoidingView,
-  Platform,
-  ActivityIndicator,
-  RefreshControl,
+  StyleSheet, View, Text, TouchableOpacity, ScrollView,
+  Dimensions, Alert, Modal, TextInput,
+  KeyboardAvoidingView, Platform, ActivityIndicator,
   Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
+import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import { API_URL } from '../../environments/environment';
 
-const { width, height } = Dimensions.get('window');
+const { height } = Dimensions.get('window');
 
-// ─── Palette ByMap ───────────────────────────────────────────────────────────
+// ── Palette — même thème que LocalScreen ─────────────────────────────────────
 const C = {
-  blue:       '#1E90FF',
-  blueDark:   '#0A6FCC',
-  blueLight:  '#E8F3FF',
-  grey:       '#4A4A5A',
-  greyDark:   '#1E1E2E',
-  greyLight:  '#F5F6FA',
-  border:     '#E2E4EF',
+  green:      '#2DBD7E',
+  greenDark:  '#22A06B',
+  greenGlow:  'rgba(45,189,126,0.12)',
+  blue:       '#3B7EF6',
+  blueGlow:   'rgba(59,126,246,0.12)',
+  orange:     '#F59E0B',
+  orangeGlow: 'rgba(245,158,11,0.12)',
+  bg:         '#F2F5F3',
   white:      '#FFFFFF',
-  red:        '#FF3B30',
-  green:      '#34C759',
-  orange:     '#FF9500',
+  text:       '#1A1A2E',
+  textDim:    '#4B5563',
+  textFaint:  '#9CA3AF',
+  border:     '#E5E7EB',
+  borderLight:'#F0F0F0',
+  inputBg:    '#F8FAFB',
+  red:        '#EF4444',
+  redGlow:    'rgba(239,68,68,0.10)',
 };
 
-// ─── Config stats ────────────────────────────────────────────────────────────
+// ── Config stats avec icônes FontAwesome6 ─────────────────────────────────────
 const STAT_CONFIG = [
-  { key: 'totalUsers',        label: 'Utilisateurs', icon: '👥', color: C.blue,   bg: C.blueLight },
-  { key: 'totalPublications', label: 'Publications',  icon: '📝', color: C.orange, bg: '#FFF4E5'   },
-  { key: 'lieux',             label: 'Lieux actifs',  icon: '📍', color: C.green,  bg: '#E8FAF0'   },
+  { key: 'totalUsers',        label: 'Utilisateurs', icon: 'users',        color: C.blue,   glow: C.blueGlow   },
+  { key: 'totalPublications', label: 'Publications',  icon: 'newspaper',    color: C.orange, glow: C.orangeGlow },
+  { key: 'lieux',             label: 'Lieux actifs',  icon: 'location-dot', color: C.green,  glow: C.greenGlow  },
 ];
 
 const CATEGORIES = ['Restaurant', 'Hôtel', 'Musée', 'Parc', 'Commerce', 'Sport', 'Santé', 'Autre'];
 
-
-// ─── Composants utilitaires ───────────────────────────────────────────────────
-const StatCard = ({ label, value, icon, color, bg, onPress }) => (
+// ── StatCard ──────────────────────────────────────────────────────────────────
+const StatCard = ({ label, value, icon, color, glow, onPress }) => (
   <TouchableOpacity
-    style={[styles.statCard, { backgroundColor: bg, borderLeftColor: color }]}
-    onPress={onPress} activeOpacity={onPress ? 0.75 : 1}
+    style={[styles.statCard, { borderTopColor: color }]}
+    onPress={onPress} activeOpacity={onPress ? 0.78 : 1}
   >
-    <Text style={styles.statIcon}>{icon}</Text>
-    <Text style={[styles.statValue, { color }]}>{value}</Text>
+    <View style={[styles.statIconBox, { backgroundColor: glow }]}>
+      <FontAwesome6 name={icon} size={19} color={color} />
+    </View>
+    <Text style={[styles.statValue, { color }]}>{value ?? '—'}</Text>
     <Text style={styles.statLabel}>{label}</Text>
-    {onPress && <Text style={[styles.statArrow, { color }]}>→</Text>}
+    {onPress && (
+      <View style={[styles.statArrow, { backgroundColor: glow }]}>
+        <FontAwesome6 name="chevron-right" size={10} color={color} />
+      </View>
+    )}
   </TouchableOpacity>
 );
 
-const statusColor = (s) => {
-  if (s === 'actif')  return C.green;
-  if (s === 'bloqué') return C.red;
-  return C.orange;
-};
-
-const UserRow = ({ item }) => (
-  <View style={styles.userRow}>
-    <View style={styles.userAvatar}>
-      <Text style={styles.userAvatarText}>{item.name.charAt(0)}</Text>
-    </View>
-    <View style={styles.userInfo}>
-      <Text style={styles.userName}>{item.name}</Text>
-      <Text style={styles.userEmail}>{item.email}</Text>
-    </View>
-    <View style={styles.userMeta}>
-      <View style={[styles.statusBadge, { backgroundColor: statusColor(item.status) + '22' }]}>
-        <Text style={[styles.statusText, { color: statusColor(item.status) }]}>{item.status}</Text>
-      </View>
-      <Text style={styles.userDate}>{item.date}</Text>
-    </View>
-  </View>
-);
-
-// ─── Modal Ajouter un lieu ────────────────────────────────────────────────────
+// ── AddLieuModal ──────────────────────────────────────────────────────────────
 const AddLieuModal = ({ visible, onClose, navigation, initialCoords }) => {
   const [nom,         setNom]         = useState('');
   const [adresse,     setAdresse]     = useState('');
@@ -97,7 +76,6 @@ const AddLieuModal = ({ visible, onClose, navigation, initialCoords }) => {
   const [latitude,    setLatitude]    = useState('');
   const [longitude,   setLongitude]   = useState('');
 
-  // Pré-remplir coords si reçues depuis la carte
   useEffect(() => {
     if (initialCoords) {
       setLatitude(initialCoords.latitude.toFixed(6));
@@ -110,126 +88,90 @@ const AddLieuModal = ({ visible, onClose, navigation, initialCoords }) => {
     setDescription(''); setLatitude(''); setLongitude('');
   };
 
-  const handlePickOnMap = () => {
-    // Ferme le modal et navigue vers MapScreen en mode sélection
-    onClose();
-    navigation.navigate('Map', { pickMode: true });
-  };
+  const handlePickOnMap = () => { onClose(); navigation.navigate('Map', { pickMode: true }); };
 
   const handleConfirm = () => {
     if (!nom.trim())     { Alert.alert('Erreur', 'Le nom du lieu est obligatoire.'); return; }
     if (!adresse.trim()) { Alert.alert('Erreur', "L'adresse est obligatoire."); return; }
     if (!categorie)      { Alert.alert('Erreur', 'Choisissez une catégorie.'); return; }
-    if (!latitude.trim() || !longitude.trim()) {
-      Alert.alert('Erreur', 'Choisissez une zone sur la carte.'); return;
-    }
-    Alert.alert('✅ Lieu ajouté', `"${nom}" a été ajouté à la carte avec succès.`, [
+    if (!latitude.trim() || !longitude.trim()) { Alert.alert('Erreur', 'Choisissez une zone sur la carte.'); return; }
+    Alert.alert('Lieu ajouté', `"${nom}" a été ajouté à la carte avec succès.`, [
       { text: 'OK', onPress: () => { reset(); onClose(); } },
     ]);
   };
 
-  const handleClose = () => { reset(); onClose(); };
-
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
-      <View style={modal.overlay}>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={() => { reset(); onClose(); }}>
+      <View style={m.overlay}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%', alignItems: 'center' }}>
-          <View style={modal.sheet}>
+          <View style={m.sheet}>
+            <View style={m.sheetHandle} />
 
-            {/* En-tête */}
-            <View style={modal.header}>
-              <Text style={modal.title}>📍 Ajouter un lieu</Text>
-              <TouchableOpacity onPress={handleClose} style={modal.closeBtn}>
-                <Text style={modal.closeX}>✕</Text>
+            <View style={m.header}>
+              <View style={[m.headerIcon, { backgroundColor: C.greenGlow }]}>
+                <FontAwesome6 name="location-dot" size={18} color={C.green} />
+              </View>
+              <Text style={m.title}>Ajouter un lieu</Text>
+              <TouchableOpacity onPress={() => { reset(); onClose(); }} style={m.closeBtn} hitSlop={8}>
+                <FontAwesome6 name="xmark" size={16} color={C.textDim} />
               </TouchableOpacity>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 12 }}>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 16 }}>
+              <Text style={m.label}>Nom du lieu <Text style={m.req}>*</Text></Text>
+              <TextInput style={m.input} placeholder="Ex : Café Central" placeholderTextColor={C.textFaint} value={nom} onChangeText={setNom} />
 
-              {/* Nom */}
-              <Text style={modal.label}>Nom du lieu <Text style={modal.required}>*</Text></Text>
-              <TextInput
-                style={modal.input}
-                placeholder="Ex: Café Central"
-                placeholderTextColor="#B0B3C6"
-                value={nom}
-                onChangeText={setNom}
-              />
+              <Text style={m.label}>Adresse <Text style={m.req}>*</Text></Text>
+              <TextInput style={m.input} placeholder="Ex : 12 Avenue Habib Bourguiba" placeholderTextColor={C.textFaint} value={adresse} onChangeText={setAdresse} />
 
-              {/* Adresse */}
-              <Text style={modal.label}>Adresse <Text style={modal.required}>*</Text></Text>
-              <TextInput
-                style={modal.input}
-                placeholder="Ex: 12 Avenue Habib Bourguiba, Tunis"
-                placeholderTextColor="#B0B3C6"
-                value={adresse}
-                onChangeText={setAdresse}
-              />
-
-              {/* Catégorie */}
-              <Text style={modal.label}>Catégorie <Text style={modal.required}>*</Text></Text>
+              <Text style={m.label}>Catégorie <Text style={m.req}>*</Text></Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
                   {CATEGORIES.map((cat) => (
                     <TouchableOpacity
                       key={cat}
-                      style={[modal.catChip, categorie === cat && modal.catChipActive]}
-                      onPress={() => setCategorie(cat)}
-                      activeOpacity={0.8}
+                      style={[m.chip, categorie === cat && m.chipActive]}
+                      onPress={() => setCategorie(cat)} activeOpacity={0.8}
                     >
-                      <Text style={[modal.catText, categorie === cat && modal.catTextActive]}>{cat}</Text>
+                      <Text style={[m.chipText, categorie === cat && m.chipTextActive]}>{cat}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
               </ScrollView>
 
-              {/* Description */}
-              <Text style={modal.label}>Description</Text>
-              <TextInput
-                style={[modal.input, modal.textArea]}
-                placeholder="Décrivez ce lieu..."
-                placeholderTextColor="#B0B3C6"
-                value={description}
-                onChangeText={setDescription}
-                multiline
-                numberOfLines={3}
-              />
+              <Text style={m.label}>Description</Text>
+              <TextInput style={[m.input, m.textArea]} placeholder="Décrivez ce lieu…" placeholderTextColor={C.textFaint} value={description} onChangeText={setDescription} multiline numberOfLines={3} />
 
-              {/* Zone sur la carte */}
-              <Text style={modal.label}>Zone sur la carte <Text style={modal.required}>*</Text></Text>
-
-              {/* Bouton choisir sur la carte */}
-              <TouchableOpacity style={modal.mapPickBtn} onPress={handlePickOnMap} activeOpacity={0.85}>
-                <Text style={modal.mapPickIcon}>🗺️</Text>
-                <Text style={modal.mapPickText}>Choisir la zone sur la carte</Text>
+              <Text style={m.label}>Zone sur la carte <Text style={m.req}>*</Text></Text>
+              <TouchableOpacity style={m.mapBtn} onPress={handlePickOnMap} activeOpacity={0.85}>
+                <FontAwesome6 name="map" size={17} color={C.blue} />
+                <Text style={m.mapBtnText}>Choisir sur la carte</Text>
               </TouchableOpacity>
 
-              {/* Affichage des coordonnées si déjà choisies */}
               {latitude !== '' && longitude !== '' && (
-                <View style={modal.coordsResult}>
-                  <Text style={modal.coordsResultIcon}>✅</Text>
-                  <View>
-                    <Text style={modal.coordsResultLabel}>Zone sélectionnée</Text>
-                    <Text style={modal.coordsResultVal}>
-                      {parseFloat(latitude).toFixed(5)}, {parseFloat(longitude).toFixed(5)}
-                    </Text>
+                <View style={m.coordsBox}>
+                  <FontAwesome6 name="circle-check" size={16} color={C.green} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={m.coordsLabel}>Zone sélectionnée</Text>
+                    <Text style={m.coordsVal}>{parseFloat(latitude).toFixed(5)}, {parseFloat(longitude).toFixed(5)}</Text>
                   </View>
-                  <TouchableOpacity onPress={() => { setLatitude(''); setLongitude(''); }}>
-                    <Text style={modal.coordsClear}>✕</Text>
+                  <TouchableOpacity onPress={() => { setLatitude(''); setLongitude(''); }} hitSlop={8}>
+                    <FontAwesome6 name="xmark" size={14} color={C.textFaint} />
                   </TouchableOpacity>
                 </View>
               )}
 
-              {/* Boutons */}
-              <View style={modal.btnRow}>
-                <TouchableOpacity style={modal.cancelBtn} onPress={handleClose} activeOpacity={0.8}>
-                  <Text style={modal.cancelText}>Annuler</Text>
+              <View style={m.btnRow}>
+                <TouchableOpacity style={m.cancelBtn} onPress={() => { reset(); onClose(); }} activeOpacity={0.8}>
+                  <Text style={m.cancelText}>Annuler</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={modal.confirmBtn} onPress={handleConfirm} activeOpacity={0.88}>
-                  <Text style={modal.confirmText}>✓ Confirmer</Text>
+                <TouchableOpacity style={m.confirmBtn} onPress={handleConfirm} activeOpacity={0.88}>
+                  <LinearGradient colors={[C.green, C.greenDark]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={m.confirmGrad}>
+                    <FontAwesome6 name="check" size={13} color="#fff" style={{ marginRight: 6 }} />
+                    <Text style={m.confirmText}>Confirmer</Text>
+                  </LinearGradient>
                 </TouchableOpacity>
               </View>
-
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
@@ -238,51 +180,37 @@ const AddLieuModal = ({ visible, onClose, navigation, initialCoords }) => {
   );
 };
 
-// ─── Picker en cascade (bottom sheet interne) ────────────────────────────────
+// ── CascadePicker ─────────────────────────────────────────────────────────────
 const CascadePicker = ({ visible, title, items, labelKey, subKey, loading, onSelect, onClose }) => {
   const [search, setSearch] = useState('');
   const filtered = search.trim()
-    ? items.filter(it => {
-        const label = labelKey ? it[labelKey] : it;
-        return label.toLowerCase().includes(search.toLowerCase());
-      })
+    ? items.filter(it => (labelKey ? it[labelKey] : it).toLowerCase().includes(search.toLowerCase()))
     : items;
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={zf.pickerOverlay}>
-        <View style={zf.pickerSheet}>
-          {/* Header */}
-          <View style={zf.pickerHeader}>
-            <Text style={zf.pickerTitle}>{title}</Text>
-            <TouchableOpacity onPress={() => { setSearch(''); onClose(); }} style={modal.closeBtn}>
-              <Text style={modal.closeX}>✕</Text>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={() => { setSearch(''); onClose(); }}>
+      <View style={pick.overlay}>
+        <View style={pick.sheet}>
+          <View style={m.sheetHandle} />
+          <View style={pick.header}>
+            <Text style={pick.title}>{title}</Text>
+            <TouchableOpacity onPress={() => { setSearch(''); onClose(); }} style={m.closeBtn} hitSlop={8}>
+              <FontAwesome6 name="xmark" size={16} color={C.textDim} />
             </TouchableOpacity>
           </View>
-          {/* Recherche */}
-          <View style={zf.pickerSearch}>
-            <Text style={{ fontSize: 14, marginRight: 6 }}>🔍</Text>
-            <TextInput
-              style={zf.pickerSearchInput}
-              placeholder="Rechercher…"
-              placeholderTextColor="#B0B3C6"
-              value={search}
-              onChangeText={setSearch}
-              autoCorrect={false}
-            />
+          <View style={pick.searchBox}>
+            <FontAwesome6 name="magnifying-glass" size={14} color={C.textFaint} />
+            <TextInput style={pick.searchInput} placeholder="Rechercher…" placeholderTextColor={C.textFaint} value={search} onChangeText={setSearch} autoCorrect={false} />
             {search.length > 0 && (
-              <TouchableOpacity onPress={() => setSearch('')}>
-                <Text style={{ color: C.grey, fontWeight: '700', fontSize: 14 }}>✕</Text>
+              <TouchableOpacity onPress={() => setSearch('')} hitSlop={8}>
+                <FontAwesome6 name="xmark" size={13} color={C.textFaint} />
               </TouchableOpacity>
             )}
           </View>
-          {/* Liste */}
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-            {loading && (
-              <ActivityIndicator color={C.blue} style={{ marginVertical: 24 }} />
-            )}
+            {loading && <ActivityIndicator color={C.green} style={{ marginVertical: 24 }} />}
             {!loading && filtered.length === 0 && (
-              <Text style={zf.pickerEmpty}>Aucun résultat</Text>
+              <Text style={pick.empty}>Aucun résultat</Text>
             )}
             {filtered.map((item, i) => {
               const label = labelKey ? item[labelKey] : item;
@@ -290,12 +218,12 @@ const CascadePicker = ({ visible, title, items, labelKey, subKey, loading, onSel
               return (
                 <TouchableOpacity
                   key={i}
-                  style={[zf.pickerItem, i < filtered.length - 1 && zf.pickerItemBorder]}
+                  style={[pick.item, i < filtered.length - 1 && pick.itemBorder]}
                   onPress={() => { setSearch(''); onSelect(item); onClose(); }}
                   activeOpacity={0.7}
                 >
-                  <Text style={zf.pickerItemLabel}>{label}</Text>
-                  {sub && <Text style={zf.pickerItemSub}>{sub}</Text>}
+                  <Text style={pick.itemLabel}>{label}</Text>
+                  {sub && <Text style={pick.itemSub}>{sub}</Text>}
                 </TouchableOpacity>
               );
             })}
@@ -306,143 +234,90 @@ const CascadePicker = ({ visible, title, items, labelKey, subKey, loading, onSel
   );
 };
 
-// Liste statique des pays disponibles (Tunisia gérée séparément)
 const PAYS_LIST = [
-  { code: 'TN', name: 'Tunisie',    flag: '🇹🇳' },
-  { code: 'DZ', name: 'Algérie',    flag: '🇩🇿' },
-  { code: 'FR', name: 'France',     flag: '🇫🇷' },
-  { code: 'DE', name: 'Allemagne',  flag: '🇩🇪' },
-  { code: 'IT', name: 'Italie',     flag: '🇮🇹' },
-  { code: 'ES', name: 'Espagne',    flag: '🇪🇸' },
+  { code: 'TN', name: 'Tunisie',   flag: '🇹🇳' },
+  { code: 'DZ', name: 'Algérie',   flag: '🇩🇿' },
+  { code: 'FR', name: 'France',    flag: '🇫🇷' },
+  { code: 'DE', name: 'Allemagne', flag: '🇩🇪' },
+  { code: 'IT', name: 'Italie',    flag: '🇮🇹' },
+  { code: 'ES', name: 'Espagne',   flag: '🇪🇸' },
 ];
 
-// ─── Modal Ajouter une zone ───────────────────────────────────────────────────
+// ── AddZoneModal ──────────────────────────────────────────────────────────────
 const AddZoneModal = ({ visible, onClose, navigation, initialCoords, onSaved }) => {
-  const [pays,        setPays]        = useState(null);   // { code, name, flag }
+  const [pays,        setPays]        = useState(null);
   const [ville,       setVille]       = useState('');
   const [gouvernorat, setGouvernorat] = useState('');
   const [delegation,  setDelegation]  = useState('');
   const [nomZone,     setNomZone]     = useState('');
+  const [categorie,   setCategorie]   = useState('');
   const [lat,         setLat]         = useState('');
   const [lng,         setLng]         = useState('');
   const [saving,      setSaving]      = useState(false);
 
-  const [paysOpen,   setPaysOpen]   = useState(false);
-  const [villeOpen,  setVilleOpen]  = useState(false);
-  const [govOpen,    setGovOpen]    = useState(false);
-  const [delOpen,    setDelOpen]    = useState(false);
+  const [paysOpen,  setPaysOpen]  = useState(false);
+  const [villeOpen, setVilleOpen] = useState(false);
+  const [govOpen,   setGovOpen]   = useState(false);
+  const [delOpen,   setDelOpen]   = useState(false);
 
   const isTunisia = pays?.code === 'TN';
-
-  // Listes chargées depuis l'API
   const [villes,       setVilles]       = useState([]);
   const [gouvernorats, setGouvernorats] = useState([]);
   const [delegations,  setDelegations]  = useState([]);
-  const [loadingV,     setLoadingV]     = useState(false);
-  const [loadingG,     setLoadingG]     = useState(false);
-  const [loadingD,     setLoadingD]     = useState(false);
+  const [loadingV, setLoadingV] = useState(false);
+  const [loadingG, setLoadingG] = useState(false);
+  const [loadingD, setLoadingD] = useState(false);
 
-  // Reset cascade quand le pays change
   useEffect(() => {
     setVille(''); setGouvernorat(''); setDelegation('');
     setVilles([]); setGouvernorats([]); setDelegations([]);
     if (!initialCoords) { setLat(''); setLng(''); }
   }, [pays]);
 
-  // Tunisia: charger gouvernorats (= "villes" dans le cascade Tunisia)
   useEffect(() => {
     if (!visible || !pays || !isTunisia) return;
     setLoadingV(true);
-    fetch(`${API_URL}/localites/gouvernorats`)
-      .then(r => r.json())
-      .then(d => setVilles(d.gouvernorats || []))
-      .catch(() => Alert.alert('Erreur', 'Impossible de charger les gouvernorats.'))
-      .finally(() => setLoadingV(false));
+    fetch(`${API_URL}/localites/gouvernorats`).then(r => r.json()).then(d => setVilles(d.gouvernorats || [])).catch(() => Alert.alert('Erreur', 'Impossible de charger les gouvernorats.')).finally(() => setLoadingV(false));
   }, [visible, pays]);
 
-  // Autres pays: charger les villes depuis /api/pays/:code/cities
   useEffect(() => {
     if (!visible || !pays || isTunisia) return;
     setLoadingV(true);
-    fetch(`${API_URL}/pays/${pays.code}/cities`)
-      .then(r => r.json())
-      .then(d => setVilles(d.cities || []))
-      .catch(() => Alert.alert('Erreur', 'Impossible de charger les villes.'))
-      .finally(() => setLoadingV(false));
+    fetch(`${API_URL}/pays/${pays.code}/cities`).then(r => r.json()).then(d => setVilles(d.cities || [])).catch(() => Alert.alert('Erreur', 'Impossible de charger les villes.')).finally(() => setLoadingV(false));
   }, [visible, pays]);
 
-  // Tunisia: délégations quand gouvernorat (ville) change
   useEffect(() => {
     if (!isTunisia || !ville) return;
     setLoadingG(true);
-    fetch(`${API_URL}/localites/delegations?gouvernorat=${encodeURIComponent(ville)}`)
-      .then(r => r.json())
-      .then(d => setGouvernorats(d.delegations || []))
-      .catch(() => Alert.alert('Erreur', 'Impossible de charger les délégations.'))
-      .finally(() => setLoadingG(false));
+    fetch(`${API_URL}/localites/delegations?gouvernorat=${encodeURIComponent(ville)}`).then(r => r.json()).then(d => setGouvernorats(d.delegations || [])).catch(() => Alert.alert('Erreur', 'Impossible de charger les délégations.')).finally(() => setLoadingG(false));
   }, [ville, isTunisia]);
 
-  // Tunisia: localités quand délégation (gouvernorat) change
   useEffect(() => {
     if (!isTunisia || !ville || !gouvernorat) return;
     setLoadingD(true);
-    fetch(`${API_URL}/localites?gouvernorat=${encodeURIComponent(ville)}&delegation=${encodeURIComponent(gouvernorat)}`)
-      .then(r => r.json())
-      .then(d => setDelegations(d.localites || []))
-      .catch(() => Alert.alert('Erreur', 'Impossible de charger les localités.'))
-      .finally(() => setLoadingD(false));
+    fetch(`${API_URL}/localites?gouvernorat=${encodeURIComponent(ville)}&delegation=${encodeURIComponent(gouvernorat)}`).then(r => r.json()).then(d => setDelegations(d.localites || [])).catch(() => Alert.alert('Erreur', 'Impossible de charger les localités.')).finally(() => setLoadingD(false));
   }, [ville, gouvernorat, isTunisia]);
 
   useEffect(() => {
-    if (initialCoords) {
-      setLat(initialCoords.latitude.toFixed(6));
-      setLng(initialCoords.longitude.toFixed(6));
-    }
+    if (initialCoords) { setLat(initialCoords.latitude.toFixed(6)); setLng(initialCoords.longitude.toFixed(6)); }
   }, [initialCoords]);
 
-  const handleSelectPays = (p) => { setPays(p); };
-
-  // Tunisia selectors
-  const handleSelectVille = (v) => {
-    setVille(v); setGouvernorat(''); setDelegation('');
-    if (!initialCoords) { setLat(''); setLng(''); }
-  };
-  const handleSelectGouvernorat = (g) => {
-    setGouvernorat(g); setDelegation('');
-    if (!initialCoords) { setLat(''); setLng(''); }
-  };
-  const handleSelectDelegation = (loc) => {
-    setDelegation(loc.localite);
-    setLat(loc.lat.toFixed(6));
-    setLng(loc.lng.toFixed(6));
-  };
-
-  // Other country: city selection (name is a string in cities array)
-  const handleSelectCity = (city) => {
-    setVille(city.name || city);
-  };
-
   const reset = () => {
-    setPays(null);
-    setVille(''); setGouvernorat(''); setDelegation('');
-    setNomZone(''); setLat(''); setLng('');
+    setPays(null); setVille(''); setGouvernorat(''); setDelegation('');
+    setNomZone(''); setCategorie(''); setLat(''); setLng('');
     setVilles([]); setGouvernorats([]); setDelegations([]);
   };
 
   const handlePickOnMap = async () => {
-    onClose();
-    await AsyncStorage.setItem('adminPickTarget', 'zone');
+    onClose(); await AsyncStorage.setItem('adminPickTarget', 'zone');
     navigation.navigate('Map', { pickMode: true });
   };
 
   const handleConfirm = async () => {
-    if (!pays)          { Alert.alert('Erreur', 'Sélectionnez un pays.');             return; }
-    if (!ville)         { Alert.alert('Erreur', isTunisia ? 'Sélectionnez un gouvernorat.' : 'Sélectionnez une ville.'); return; }
-    if (isTunisia && !gouvernorat) { Alert.alert('Erreur', 'Sélectionnez une délégation.'); return; }
-    if (isTunisia && !delegation)  { Alert.alert('Erreur', 'Sélectionnez une localité.');   return; }
-    if (!nomZone.trim()){ Alert.alert('Erreur', 'Le nom de la zone est obligatoire.'); return; }
-    if (!lat || !lng)   { Alert.alert('Erreur', 'Coordonnées manquantes.');            return; }
-
+    if (!pays)           { Alert.alert('Erreur', 'Sélectionnez un pays.');                                               return; }
+    if (!ville)          { Alert.alert('Erreur', isTunisia ? 'Sélectionnez un gouvernorat.' : 'Sélectionnez une ville.'); return; }
+    if (!nomZone.trim()) { Alert.alert('Erreur', 'Le nom de la zone est obligatoire.');                                  return; }
+    if (!lat || !lng)    { Alert.alert('Erreur', 'Coordonnées manquantes.');                                             return; }
     setSaving(true);
     try {
       const token = await AsyncStorage.getItem('accessToken');
@@ -454,6 +329,8 @@ const AddZoneModal = ({ visible, onClose, navigation, initialCoords, onSaved }) 
           pays:        pays.name,
           gouvernorat: isTunisia ? ville       : '',
           ville:       isTunisia ? gouvernorat : ville,
+          delegation:  delegation  || undefined,
+          categorie:   categorie   || undefined,
           lat:         parseFloat(lat),
           lng:         parseFloat(lng),
         }),
@@ -461,11 +338,9 @@ const AddZoneModal = ({ visible, onClose, navigation, initialCoords, onSaved }) 
       if (!res.ok) throw new Error();
       const data = await res.json();
       onSaved(data.zone);
-      Alert.alert('✅ Zone ajoutée', `"${nomZone}" est maintenant visible sur la carte.`, [
-        { text: 'OK', onPress: () => { reset(); onClose(); } },
-      ]);
+      Alert.alert('Zone ajoutée', `"${nomZone}" est maintenant visible sur la carte.`, [{ text: 'OK', onPress: () => { reset(); onClose(); } }]);
     } catch {
-      Alert.alert('Erreur', 'Impossible d\'ajouter la zone.');
+      Alert.alert('Erreur', "Impossible d'ajouter la zone.");
     } finally {
       setSaving(false);
     }
@@ -473,172 +348,123 @@ const AddZoneModal = ({ visible, onClose, navigation, initialCoords, onSaved }) 
 
   return (
     <>
-      {/* ─── Picker Pays ─── */}
-      <CascadePicker
-        visible={paysOpen}
-        title="Choisir un Pays"
-        items={PAYS_LIST.map(p => ({ ...p, label: `${p.flag}  ${p.name}` }))}
-        labelKey="label"
-        loading={false}
-        onSelect={handleSelectPays}
-        onClose={() => setPaysOpen(false)}
-      />
+      <CascadePicker visible={paysOpen} title="Choisir un Pays" items={PAYS_LIST.map(p => ({ ...p, label: `${p.flag}  ${p.name}` }))} labelKey="label" loading={false} onSelect={(p) => setPays(p)} onClose={() => setPaysOpen(false)} />
+      <CascadePicker visible={villeOpen} title={isTunisia ? 'Choisir un Gouvernorat' : 'Choisir une Ville'} items={villes} labelKey={isTunisia ? undefined : 'name'} loading={loadingV} onSelect={isTunisia ? (v) => { setVille(v); setGouvernorat(''); setDelegation(''); } : (c) => setVille(c.name || c)} onClose={() => setVilleOpen(false)} />
+      {isTunisia && <CascadePicker visible={govOpen} title="Choisir une Délégation" items={gouvernorats} loading={loadingG} onSelect={(g) => { setGouvernorat(g); setDelegation(''); }} onClose={() => setGovOpen(false)} />}
+      {isTunisia && <CascadePicker visible={delOpen} title="Choisir une Localité" items={delegations} labelKey="localite" loading={loadingD} onSelect={(loc) => { setDelegation(loc.localite); setLat(loc.lat.toFixed(6)); setLng(loc.lng.toFixed(6)); }} onClose={() => setDelOpen(false)} />}
 
-      {/* ─── Pickers Tunisia ─── */}
-      <CascadePicker
-        visible={villeOpen}
-        title={isTunisia ? 'Choisir un Gouvernorat' : 'Choisir une Ville'}
-        items={villes}
-        labelKey={isTunisia ? undefined : 'name'}
-        loading={loadingV}
-        onSelect={isTunisia ? handleSelectVille : handleSelectCity}
-        onClose={() => setVilleOpen(false)}
-      />
-      {isTunisia && (
-        <CascadePicker
-          visible={govOpen}
-          title="Choisir une Délégation"
-          items={gouvernorats}
-          loading={loadingG}
-          onSelect={handleSelectGouvernorat}
-          onClose={() => setGovOpen(false)}
-        />
-      )}
-      {isTunisia && (
-        <CascadePicker
-          visible={delOpen}
-          title="Choisir une Localité"
-          items={delegations}
-          labelKey="localite"
-          loading={loadingD}
-          onSelect={handleSelectDelegation}
-          onClose={() => setDelOpen(false)}
-        />
-      )}
-
-      {/* ─── Formulaire ─── */}
       <Modal visible={visible} animationType="slide" transparent onRequestClose={() => { reset(); onClose(); }}>
-        <View style={modal.overlay}>
+        <View style={m.overlay}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ width: '100%', alignItems: 'center' }}>
-            <View style={modal.sheet}>
-
-              <View style={modal.header}>
-                <Text style={modal.title}>🗺️ Nouvelle zone</Text>
-                <TouchableOpacity onPress={() => { reset(); onClose(); }} style={modal.closeBtn}>
-                  <Text style={modal.closeX}>✕</Text>
+            <View style={m.sheet}>
+              <View style={m.sheetHandle} />
+              <View style={m.header}>
+                <View style={[m.headerIcon, { backgroundColor: C.blueGlow }]}>
+                  <FontAwesome6 name="map" size={17} color={C.blue} />
+                </View>
+                <Text style={m.title}>Nouvelle zone</Text>
+                <TouchableOpacity onPress={() => { reset(); onClose(); }} style={m.closeBtn} hitSlop={8}>
+                  <FontAwesome6 name="xmark" size={16} color={C.textDim} />
                 </TouchableOpacity>
               </View>
 
               <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
-
-                {/* ── Pays ── */}
-                <Text style={zf.label}>Pays <Text style={modal.required}>*</Text></Text>
-                <TouchableOpacity style={[zf.select, pays && zf.selectFilled]} onPress={() => setPaysOpen(true)} activeOpacity={0.8}>
-                  <Text style={[zf.selectText, !pays && zf.selectPlaceholder]} numberOfLines={1}>
-                    {pays ? `${pays.flag}  ${pays.name}` : 'Sélectionner un pays…'}
-                  </Text>
-                  <Text style={zf.selectArrow}>▾</Text>
+                {/* Pays */}
+                <Text style={m.label}>Pays <Text style={m.req}>*</Text></Text>
+                <TouchableOpacity style={[m.select, pays && m.selectFilled]} onPress={() => setPaysOpen(true)} activeOpacity={0.8}>
+                  <Text style={[m.selectText, !pays && m.selectPlaceholder]} numberOfLines={1}>{pays ? `${pays.flag}  ${pays.name}` : 'Sélectionner un pays…'}</Text>
+                  <FontAwesome6 name="chevron-down" size={12} color={C.textFaint} />
                 </TouchableOpacity>
 
-                {/* ── Gouvernorat (Tunisia) / Ville (autres) ── */}
-                <Text style={zf.label}>
-                  {isTunisia ? 'Gouvernorat' : 'Ville'}
-                  {' '}<Text style={modal.required}>*</Text>
-                </Text>
-                <TouchableOpacity
-                  style={[zf.select, ville && zf.selectFilled, !pays && zf.selectDisabled]}
-                  onPress={() => pays && setVilleOpen(true)}
-                  activeOpacity={pays ? 0.8 : 1}
-                >
-                  <Text style={[zf.selectText, !ville && zf.selectPlaceholder]} numberOfLines={1}>
-                    {ville || (pays
-                      ? (isTunisia ? 'Sélectionner un gouvernorat…' : 'Sélectionner une ville…')
-                      : 'Choisissez d\'abord un pays')}
-                  </Text>
-                  <Text style={zf.selectArrow}>{pays ? '▾' : '—'}</Text>
+                {/* Ville / Gouvernorat */}
+                <Text style={m.label}>{isTunisia ? 'Gouvernorat' : 'Ville'} <Text style={m.req}>*</Text></Text>
+                <TouchableOpacity style={[m.select, ville && m.selectFilled, !pays && m.selectDisabled]} onPress={() => pays && setVilleOpen(true)} activeOpacity={pays ? 0.8 : 1}>
+                  <Text style={[m.selectText, !ville && m.selectPlaceholder]} numberOfLines={1}>{ville || (pays ? (isTunisia ? 'Sélectionner un gouvernorat…' : 'Sélectionner une ville…') : "Choisissez d'abord un pays")}</Text>
+                  <FontAwesome6 name={pays ? 'chevron-down' : 'minus'} size={12} color={C.textFaint} />
                 </TouchableOpacity>
 
-                {/* ── Délégation (Tunisia only) ── */}
                 {isTunisia && (
                   <>
-                    <Text style={zf.label}>Délégation <Text style={modal.required}>*</Text></Text>
-                    <TouchableOpacity
-                      style={[zf.select, gouvernorat && zf.selectFilled, !ville && zf.selectDisabled]}
-                      onPress={() => ville && setGovOpen(true)}
-                      activeOpacity={ville ? 0.8 : 1}
-                    >
-                      <Text style={[zf.selectText, !gouvernorat && zf.selectPlaceholder]} numberOfLines={1}>
-                        {gouvernorat || (ville ? 'Sélectionner une délégation…' : 'Choisissez d\'abord un gouvernorat')}
-                      </Text>
-                      <Text style={zf.selectArrow}>{ville ? '▾' : '—'}</Text>
+                    <Text style={m.label}>Délégation <Text style={m.labelOptional}>(optionnel)</Text></Text>
+                    <TouchableOpacity style={[m.select, gouvernorat && m.selectFilled, !ville && m.selectDisabled]} onPress={() => ville && setGovOpen(true)} activeOpacity={ville ? 0.8 : 1}>
+                      <Text style={[m.selectText, !gouvernorat && m.selectPlaceholder]} numberOfLines={1}>{gouvernorat || (ville ? 'Sélectionner une délégation…' : "Choisissez d'abord un gouvernorat")}</Text>
+                      <FontAwesome6 name={ville ? 'chevron-down' : 'minus'} size={12} color={C.textFaint} />
                     </TouchableOpacity>
-
-                    <Text style={zf.label}>Localité <Text style={modal.required}>*</Text></Text>
-                    <TouchableOpacity
-                      style={[zf.select, delegation && zf.selectFilled, !gouvernorat && zf.selectDisabled]}
-                      onPress={() => gouvernorat && setDelOpen(true)}
-                      activeOpacity={gouvernorat ? 0.8 : 1}
-                    >
-                      <Text style={[zf.selectText, !delegation && zf.selectPlaceholder]} numberOfLines={1}>
-                        {delegation || (gouvernorat ? 'Sélectionner une localité…' : 'Choisissez d\'abord une délégation')}
-                      </Text>
-                      <Text style={zf.selectArrow}>{gouvernorat ? '▾' : '—'}</Text>
+                    <Text style={m.label}>Localité <Text style={m.labelOptional}>(optionnel)</Text></Text>
+                    <TouchableOpacity style={[m.select, delegation && m.selectFilled, !gouvernorat && m.selectDisabled]} onPress={() => gouvernorat && setDelOpen(true)} activeOpacity={gouvernorat ? 0.8 : 1}>
+                      <Text style={[m.selectText, !delegation && m.selectPlaceholder]} numberOfLines={1}>{delegation || (gouvernorat ? 'Sélectionner une localité…' : "Choisissez d'abord une délégation")}</Text>
+                      <FontAwesome6 name={gouvernorat ? 'chevron-down' : 'minus'} size={12} color={C.textFaint} />
                     </TouchableOpacity>
                   </>
                 )}
 
-                {/* ── Nom de la Zone ── */}
-                <Text style={zf.label}>Nom de la Zone <Text style={modal.required}>*</Text></Text>
-                <TextInput
-                  style={zf.textInput}
-                  placeholder="Ex: Zone Ariana Centre"
-                  placeholderTextColor="#B0B3C6"
-                  value={nomZone}
-                  onChangeText={setNomZone}
-                />
+                <Text style={m.label}>Nom de la Zone <Text style={m.req}>*</Text></Text>
+                <TextInput style={m.input} placeholder="Ex : Zone Ariana Centre" placeholderTextColor={C.textFaint} value={nomZone} onChangeText={setNomZone} />
 
-                {/* ── Lat / Lng ── */}
-                <View style={zf.rowCoords}>
+                <Text style={m.label}>Catégorie <Text style={m.labelOptional}>(optionnel)</Text></Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 4 }}>
+                  <View style={{ flexDirection: 'row', gap: 8, paddingBottom: 4 }}>
+                    {[
+                      { key: 'hotel',       label: 'Hôtel',        icon: 'bed'           },
+                      { key: 'sante',       label: 'Santé',        icon: 'hospital'      },
+                      { key: 'universite',  label: 'Université',   icon: 'graduation-cap'},
+                      { key: 'restaurant',  label: 'Restaurant',   icon: 'utensils'      },
+                      { key: 'commerce',    label: 'Commerce',     icon: 'store'         },
+                      { key: 'parc',        label: 'Parc',         icon: 'tree'          },
+                      { key: 'musee',       label: 'Musée',        icon: 'landmark'      },
+                      { key: 'sport',       label: 'Sport',        icon: 'dumbbell'      },
+                      { key: 'autre',       label: 'Autre',        icon: 'ellipsis'      },
+                    ].map((cat) => (
+                      <TouchableOpacity
+                        key={cat.key}
+                        style={[m.catChip, categorie === cat.key && m.catChipActive]}
+                        onPress={() => setCategorie(categorie === cat.key ? '' : cat.key)}
+                        activeOpacity={0.8}
+                      >
+                        <FontAwesome6
+                          name={cat.icon}
+                          size={12}
+                          color={categorie === cat.key ? C.green : C.textDim}
+                        />
+                        <Text style={[m.catChipText, categorie === cat.key && m.catChipTextActive]}>
+                          {cat.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </ScrollView>
+
+                <View style={{ flexDirection: 'row', gap: 12 }}>
                   <View style={{ flex: 1 }}>
-                    <Text style={zf.label}>Lat</Text>
-                    <TextInput
-                      style={[zf.textInput, lat && zf.textInputFilled]}
-                      placeholder="36.8000"
-                      placeholderTextColor="#B0B3C6"
-                      value={lat}
-                      onChangeText={setLat}
-                      keyboardType="decimal-pad"
-                    />
+                    <Text style={m.label}>Latitude</Text>
+                    <TextInput style={[m.input, lat && m.inputFilled]} placeholder="36.8000" placeholderTextColor={C.textFaint} value={lat} onChangeText={setLat} keyboardType="decimal-pad" />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={zf.label}>Lng</Text>
-                    <TextInput
-                      style={[zf.textInput, lng && zf.textInputFilled]}
-                      placeholder="10.1800"
-                      placeholderTextColor="#B0B3C6"
-                      value={lng}
-                      onChangeText={setLng}
-                      keyboardType="decimal-pad"
-                    />
+                    <Text style={m.label}>Longitude</Text>
+                    <TextInput style={[m.input, lng && m.inputFilled]} placeholder="10.1800" placeholderTextColor={C.textFaint} value={lng} onChangeText={setLng} keyboardType="decimal-pad" />
                   </View>
                 </View>
 
-                {/* Lien carte */}
-                <TouchableOpacity style={zf.mapRow} onPress={handlePickOnMap} activeOpacity={0.8}>
-                  <Text style={{ fontSize: 15 }}>🗺️</Text>
-                  <Text style={zf.mapText}>Choisir la position sur la carte</Text>
+                <TouchableOpacity style={m.mapBtn} onPress={handlePickOnMap} activeOpacity={0.8}>
+                  <FontAwesome6 name="map" size={16} color={C.blue} />
+                  <Text style={m.mapBtnText}>Choisir la position sur la carte</Text>
                 </TouchableOpacity>
 
-                {/* Boutons */}
-                <View style={modal.btnRow}>
-                  <TouchableOpacity style={modal.cancelBtn} onPress={() => { reset(); onClose(); }} activeOpacity={0.8}>
-                    <Text style={modal.cancelText}>Annuler</Text>
+                <View style={m.btnRow}>
+                  <TouchableOpacity style={m.cancelBtn} onPress={() => { reset(); onClose(); }} activeOpacity={0.8}>
+                    <Text style={m.cancelText}>Annuler</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={modal.confirmBtn} onPress={handleConfirm} activeOpacity={0.88} disabled={saving}>
-                    {saving ? <ActivityIndicator color={C.white} /> : <Text style={modal.confirmText}>✓ Confirmer</Text>}
+                  <TouchableOpacity style={m.confirmBtn} onPress={handleConfirm} activeOpacity={0.88} disabled={saving}>
+                    <LinearGradient colors={[C.green, C.greenDark]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={m.confirmGrad}>
+                      {saving ? <ActivityIndicator color="#fff" size="small" /> : (
+                        <>
+                          <FontAwesome6 name="check" size={13} color="#fff" style={{ marginRight: 6 }} />
+                          <Text style={m.confirmText}>Confirmer</Text>
+                        </>
+                      )}
+                    </LinearGradient>
                   </TouchableOpacity>
                 </View>
-
               </ScrollView>
             </View>
           </KeyboardAvoidingView>
@@ -648,92 +474,21 @@ const AddZoneModal = ({ visible, onClose, navigation, initialCoords, onSaved }) 
   );
 };
 
-// ─── Styles formulaire zone & pickers ────────────────────────────────────────
-const zf = StyleSheet.create({
-  label: { fontSize: 13, fontWeight: '700', color: C.grey, marginBottom: 6, marginTop: 14 },
-
-  // Select buttons
-  select: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: C.greyLight, borderRadius: 12, borderWidth: 1.5,
-    borderColor: C.border, paddingHorizontal: 14, paddingVertical: 14,
-    marginBottom: 2,
-  },
-  selectFilled:      { borderColor: C.blue, backgroundColor: C.blueLight },
-  selectDisabled:    { opacity: 0.45 },
-  selectText:        { fontSize: 14, color: C.greyDark, fontWeight: '600', flex: 1 },
-  selectPlaceholder: { color: '#B0B3C6', fontWeight: '400' },
-  selectArrow:       { fontSize: 13, color: C.grey, marginLeft: 8 },
-
-  // Text inputs
-  textInput: {
-    backgroundColor: C.greyLight, borderRadius: 12, borderWidth: 1.5,
-    borderColor: C.border, paddingHorizontal: 14, paddingVertical: 13,
-    fontSize: 14, color: C.greyDark, marginBottom: 2,
-  },
-  textInputFilled: { borderColor: C.blue, backgroundColor: C.blueLight },
-  rowCoords: { flexDirection: 'row', gap: 12 },
-
-  // Map link
-  mapRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12, marginTop: 2, marginBottom: 4 },
-  mapText: { fontSize: 13, color: C.blue, fontWeight: '700' },
-
-  // Picker bottom sheet
-  pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  pickerSheet: {
-    backgroundColor: C.white, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    paddingTop: 20, paddingHorizontal: 0, maxHeight: height * 0.75,
-  },
-  pickerHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingBottom: 14,
-    borderBottomWidth: 1, borderBottomColor: C.border,
-  },
-  pickerTitle: { fontSize: 16, fontWeight: '800', color: C.greyDark },
-  pickerSearch: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    margin: 12, paddingHorizontal: 14, paddingVertical: 10,
-    backgroundColor: C.greyLight, borderRadius: 12, borderWidth: 1.5, borderColor: C.border,
-  },
-  pickerSearchInput: { flex: 1, fontSize: 14, color: C.greyDark, padding: 0 },
-  pickerEmpty: { textAlign: 'center', paddingVertical: 24, color: C.grey, fontSize: 14 },
-  pickerItem: { paddingHorizontal: 20, paddingVertical: 14 },
-  pickerItemBorder: { borderBottomWidth: 1, borderBottomColor: C.border },
-  pickerItemLabel: { fontSize: 15, fontWeight: '600', color: C.greyDark },
-  pickerItemSub:   { fontSize: 12, color: C.grey, marginTop: 2 },
-});
-
-// ─── Parsing JSON (formats: tableau simple / {zones:[]} / tunisia {Gov:[]} ) ──
+// ── Parsing JSON zones ────────────────────────────────────────────────────────
 function parseZonesFromJson(raw) {
   if (Array.isArray(raw)) {
-    return raw.map(z => ({
-      name:        (z.name || z.localite || z.nom || '').toString().trim() || 'Sans nom',
-      gouvernorat: z.gouvernorat || '',
-      ville:       z.ville || z.delegation || '',
-      lat:         z.lat ?? z.latitude,
-      lng:         z.lng ?? z.longitude,
-    }));
+    return raw.map(z => ({ name: (z.name || z.localite || z.nom || '').toString().trim() || 'Sans nom', gouvernorat: z.gouvernorat || '', ville: z.ville || z.delegation || '', lat: z.lat ?? z.latitude, lng: z.lng ?? z.longitude }));
   }
   if (raw.zones && Array.isArray(raw.zones)) return parseZonesFromJson(raw.zones);
-
-  // Format Tunisia : { "Gouvernorat": [{ delegation, localite, lat, lng }] }
   const result = [];
   for (const [gov, locs] of Object.entries(raw)) {
     if (!Array.isArray(locs)) continue;
-    for (const loc of locs) {
-      result.push({
-        name:        (loc.localite || loc.name || 'Sans nom').toString().trim(),
-        gouvernorat: gov,
-        ville:       loc.delegation || '',
-        lat:         loc.lat,
-        lng:         loc.lng,
-      });
-    }
+    for (const loc of locs) result.push({ name: (loc.localite || loc.name || 'Sans nom').toString().trim(), gouvernorat: gov, ville: loc.delegation || '', lat: loc.lat, lng: loc.lng });
   }
   return result;
 }
 
-// ─── Modal Import JSON ────────────────────────────────────────────────────────
+// ── ImportJsonModal ───────────────────────────────────────────────────────────
 const ImportJsonModal = ({ visible, onClose, onImport }) => {
   const [fileName,   setFileName]   = useState(null);
   const [preview,    setPreview]    = useState([]);
@@ -747,21 +502,14 @@ const ImportJsonModal = ({ visible, onClose, onImport }) => {
   const pickFile = async () => {
     setPicking(true);
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['application/json', 'text/plain', 'text/json', '*/*'],
-        copyToCacheDirectory: true,
-      });
+      const result = await DocumentPicker.getDocumentAsync({ type: ['application/json', 'text/plain', '*/*'], copyToCacheDirectory: true });
       if (result.canceled) return;
       const asset = result.assets[0];
       const content = await FileSystem.readAsStringAsync(asset.uri);
-      const raw = JSON.parse(content);
-      const zones = parseZonesFromJson(raw);
-      setFileName(asset.name);
-      setParsedData(zones);
-      setTotal(zones.length);
-      setPreview(zones.slice(0, 3));
+      const zones = parseZonesFromJson(JSON.parse(content));
+      setFileName(asset.name); setParsedData(zones); setTotal(zones.length); setPreview(zones.slice(0, 3));
     } catch {
-      Alert.alert('Erreur', 'Impossible de lire le fichier. Vérifiez que c\'est un JSON valide.');
+      Alert.alert('Erreur', "Impossible de lire le fichier. Vérifiez que c'est un JSON valide.");
     } finally {
       setPicking(false);
     }
@@ -770,156 +518,136 @@ const ImportJsonModal = ({ visible, onClose, onImport }) => {
   const handleImport = async () => {
     if (!parsedData || parsedData.length === 0) return;
     setImporting(true);
-    try {
-      await onImport(parsedData);
-      reset();
-      onClose();
-    } catch (e) {
-      Alert.alert('Erreur', e.message || 'Impossible d\'importer les zones.');
-    } finally {
-      setImporting(false);
-    }
+    try { await onImport(parsedData); reset(); onClose(); }
+    catch (e) { Alert.alert('Erreur', e.message || "Impossible d'importer les zones."); }
+    finally { setImporting(false); }
   };
 
-  const handleClose = () => { reset(); onClose(); };
-
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
-      <View style={modal.overlay}>
-        <View style={[modal.sheet, { paddingBottom: 40 }]}>
-
-          <View style={modal.header}>
-            <Text style={modal.title}>📂 Importer JSON</Text>
-            <TouchableOpacity onPress={handleClose} style={modal.closeBtn}>
-              <Text style={modal.closeX}>✕</Text>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={() => { reset(); onClose(); }}>
+      <View style={m.overlay}>
+        <View style={[m.sheet, { paddingBottom: 40 }]}>
+          <View style={m.sheetHandle} />
+          <View style={m.header}>
+            <View style={[m.headerIcon, { backgroundColor: C.orangeGlow }]}>
+              <FontAwesome6 name="file-import" size={17} color={C.orange} />
+            </View>
+            <Text style={m.title}>Importer JSON</Text>
+            <TouchableOpacity onPress={() => { reset(); onClose(); }} style={m.closeBtn} hitSlop={8}>
+              <FontAwesome6 name="xmark" size={16} color={C.textDim} />
             </TouchableOpacity>
           </View>
 
-          {/* Bouton sélection fichier */}
-          <TouchableOpacity style={modal.mapPickBtn} onPress={pickFile} activeOpacity={0.85} disabled={picking}>
-            <Text style={modal.mapPickIcon}>{picking ? '⏳' : '📂'}</Text>
-            <Text style={modal.mapPickText} numberOfLines={1}>
-              {picking ? 'Lecture en cours…' : fileName || 'Choisir un fichier JSON'}
-            </Text>
+          <TouchableOpacity style={m.mapBtn} onPress={pickFile} activeOpacity={0.85} disabled={picking}>
+            <FontAwesome6 name={picking ? 'clock' : 'folder-open'} size={17} color={C.blue} />
+            <Text style={m.mapBtnText} numberOfLines={1}>{picking ? 'Lecture en cours…' : fileName || 'Choisir un fichier JSON'}</Text>
           </TouchableOpacity>
 
-          {/* Aperçu */}
           {parsedData && (
             <>
-              <View style={importSt.infoBox}>
-                <Text style={importSt.infoText}>✅ {total} zone(s) trouvée(s)</Text>
+              <View style={imp.infoBox}>
+                <FontAwesome6 name="circle-check" size={14} color={C.green} style={{ marginRight: 6 }} />
+                <Text style={imp.infoText}>{total} zone(s) trouvée(s)</Text>
               </View>
               {preview.map((z, i) => (
-                <View key={i} style={importSt.row}>
-                  <Text style={importSt.rowName} numberOfLines={1}>📍 {z.name}</Text>
-                  <Text style={importSt.rowSub} numberOfLines={1}>
-                    {[z.gouvernorat, z.ville].filter(Boolean).join(' · ')}
-                  </Text>
+                <View key={i} style={imp.row}>
+                  <FontAwesome6 name="location-dot" size={12} color={C.green} style={{ marginTop: 2 }} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={imp.rowName} numberOfLines={1}>{z.name}</Text>
+                    <Text style={imp.rowSub} numberOfLines={1}>{[z.gouvernorat, z.ville].filter(Boolean).join(' · ')}</Text>
+                  </View>
                 </View>
               ))}
-              {total > 3 && (
-                <Text style={importSt.more}>… et {total - 3} autre(s)</Text>
-              )}
+              {total > 3 && <Text style={imp.more}>… et {total - 3} autre(s)</Text>}
             </>
           )}
 
-          <View style={[modal.btnRow, { marginTop: 20 }]}>
-            <TouchableOpacity style={modal.cancelBtn} onPress={handleClose} activeOpacity={0.8}>
-              <Text style={modal.cancelText}>Annuler</Text>
+          <View style={[m.btnRow, { marginTop: 20 }]}>
+            <TouchableOpacity style={m.cancelBtn} onPress={() => { reset(); onClose(); }} activeOpacity={0.8}>
+              <Text style={m.cancelText}>Annuler</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[modal.confirmBtn, (!parsedData || importing) && { opacity: 0.5 }]}
-              onPress={handleImport}
-              activeOpacity={0.88}
-              disabled={!parsedData || importing}
-            >
-              {importing
-                ? <ActivityIndicator color={C.white} />
-                : <Text style={modal.confirmText}>⬇ Importer {total > 0 ? `(${total})` : ''}</Text>}
+            <TouchableOpacity style={[m.confirmBtn, (!parsedData || importing) && { opacity: 0.5 }]} onPress={handleImport} activeOpacity={0.88} disabled={!parsedData || importing}>
+              <LinearGradient colors={[C.green, C.greenDark]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={m.confirmGrad}>
+                {importing ? <ActivityIndicator color="#fff" size="small" /> : (
+                  <>
+                    <FontAwesome6 name="file-import" size={13} color="#fff" style={{ marginRight: 6 }} />
+                    <Text style={m.confirmText}>Importer {total > 0 ? `(${total})` : ''}</Text>
+                  </>
+                )}
+              </LinearGradient>
             </TouchableOpacity>
           </View>
-
         </View>
       </View>
     </Modal>
   );
 };
 
-const importSt = StyleSheet.create({
-  infoBox: {
-    backgroundColor: '#E8FAF0', borderRadius: 10, borderWidth: 1.5,
-    borderColor: C.green, padding: 12, marginBottom: 12, alignItems: 'center',
-  },
-  infoText: { fontSize: 14, fontWeight: '800', color: C.green },
-  row: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: C.border },
-  rowName: { fontSize: 13, fontWeight: '700', color: C.greyDark },
-  rowSub:  { fontSize: 11, color: C.grey, marginTop: 2 },
-  more:    { fontSize: 12, color: C.grey, textAlign: 'center', paddingVertical: 8 },
+const imp = StyleSheet.create({
+  infoBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.greenGlow, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(45,189,126,0.3)', padding: 12, marginBottom: 12 },
+  infoText: { fontSize: 14, fontWeight: '700', color: C.green },
+  row:     { flexDirection: 'row', alignItems: 'flex-start', gap: 8, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: C.borderLight },
+  rowName: { fontSize: 13, fontWeight: '700', color: C.text },
+  rowSub:  { fontSize: 11, color: C.textFaint, marginTop: 2 },
+  more:    { fontSize: 12, color: C.textFaint, textAlign: 'center', paddingVertical: 8 },
 });
 
-// ─── Vue gestion des zones ────────────────────────────────────────────────────
+// ── ZonesView ─────────────────────────────────────────────────────────────────
 function ZonesView({ onBack, onAdd, onImport, onExport, zones, loading, onDelete }) {
   return (
-    <View style={{ flex: 1 }}>
-      <View style={styles.ulHeader}>
-        <TouchableOpacity onPress={onBack} style={styles.ulBackBtn} activeOpacity={0.7}>
-          <Text style={styles.ulBackIcon}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.ulTitle}>Zones de la carte</Text>
-        <View style={styles.ulCount}>
-          <Text style={styles.ulCountText}>{zones.length}</Text>
+    <View style={{ flex: 1, backgroundColor: C.bg }}>
+      <View style={styles.subHeader}>
+        {!!onBack && (
+          <TouchableOpacity onPress={onBack} style={styles.backBtn} activeOpacity={0.7}>
+            <FontAwesome6 name="arrow-left" size={18} color={C.text} />
+          </TouchableOpacity>
+        )}
+        <FontAwesome6 name="map" size={18} color={C.green} />
+        <Text style={styles.subHeaderTitle}>Zones de la carte</Text>
+        <View style={styles.countBadge}>
+          <Text style={styles.countBadgeText}>{zones.length}</Text>
         </View>
       </View>
 
-      <View style={styles.zoneActionsRow}>
-        <TouchableOpacity style={[styles.zoneActionBtn, { backgroundColor: C.blue }]} onPress={onAdd} activeOpacity={0.85}>
-          <Text style={styles.zoneActionIcon}>＋</Text>
-          <Text style={styles.zoneActionText}>Ajouter</Text>
+      <View style={styles.actionsRow}>
+        <TouchableOpacity style={[styles.actionChip, { backgroundColor: C.blueGlow, borderColor: C.blue }]} onPress={onAdd} activeOpacity={0.85}>
+          <FontAwesome6 name="plus" size={13} color={C.blue} />
+          <Text style={[styles.actionChipText, { color: C.blue }]}>Ajouter</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.zoneActionBtn, { backgroundColor: C.green }]} onPress={onImport} activeOpacity={0.85}>
-          <Text style={styles.zoneActionIcon}>⬇</Text>
-          <Text style={styles.zoneActionText}>Importer</Text>
+        <TouchableOpacity style={[styles.actionChip, { backgroundColor: C.greenGlow, borderColor: C.green }]} onPress={onImport} activeOpacity={0.85}>
+          <FontAwesome6 name="file-import" size={13} color={C.green} />
+          <Text style={[styles.actionChipText, { color: C.green }]}>Importer</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.zoneActionBtn, { backgroundColor: C.orange }]} onPress={onExport} activeOpacity={0.85}>
-          <Text style={styles.zoneActionIcon}>⬆</Text>
-          <Text style={styles.zoneActionText}>Exporter</Text>
+        <TouchableOpacity style={[styles.actionChip, { backgroundColor: C.orangeGlow, borderColor: C.orange }]} onPress={onExport} activeOpacity={0.85}>
+          <FontAwesome6 name="file-export" size={13} color={C.orange} />
+          <Text style={[styles.actionChipText, { color: C.orange }]}>Exporter</Text>
         </TouchableOpacity>
       </View>
 
       {loading ? (
-        <View style={styles.ulLoader}><ActivityIndicator size="large" color={C.blue} /></View>
+        <View style={styles.loaderBox}><ActivityIndicator size="large" color={C.green} /></View>
       ) : zones.length === 0 ? (
-        <View style={styles.ulEmpty}>
-          <Text style={styles.ulEmptyIcon}>🗺️</Text>
-          <Text style={styles.ulEmptyText}>Aucune zone ajoutée</Text>
+        <View style={styles.emptyBox}>
+          <FontAwesome6 name="map" size={56} color="#D1D5DB" />
+          <Text style={styles.emptyTitle}>Aucune zone ajoutée</Text>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={[styles.ulList, { paddingTop: 8 }]} showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={styles.listPad} showsVerticalScrollIndicator={false}>
           {zones.map(z => (
             <View key={z._id} style={styles.zoneCard}>
-              <View style={styles.zoneCardIconBox}>
-                <Text style={{ fontSize: 22 }}>📍</Text>
+              <View style={[styles.zoneIconBox, { backgroundColor: C.greenGlow }]}>
+                <FontAwesome6 name="location-dot" size={20} color={C.green} />
               </View>
-              <View style={styles.zoneCardInfo}>
-                <Text style={styles.zoneCardName} numberOfLines={1}>{z.name}</Text>
-                {z.pays ? (
-                  <Text style={styles.zoneCardPays} numberOfLines={1}>{z.pays}</Text>
-                ) : null}
+              <View style={styles.zoneInfo}>
+                <Text style={styles.zoneName} numberOfLines={1}>{z.name}</Text>
+                {z.pays ? <Text style={styles.zonePays} numberOfLines={1}>{z.pays}</Text> : null}
                 {(z.gouvernorat || z.ville) ? (
-                  <Text style={styles.zoneCardLocation} numberOfLines={1}>
-                    {[z.gouvernorat, z.ville].filter(Boolean).join(' · ')}
-                  </Text>
+                  <Text style={styles.zoneLoc} numberOfLines={1}>{[z.gouvernorat, z.ville].filter(Boolean).join(' · ')}</Text>
                 ) : null}
-                <Text style={styles.zoneCardCoords}>
-                  {z.lat?.toFixed(4)}, {z.lng?.toFixed(4)}
-                </Text>
+                <Text style={styles.zoneCoords}>{z.lat?.toFixed(4)}, {z.lng?.toFixed(4)}</Text>
               </View>
-              <TouchableOpacity
-                style={styles.zoneDeleteBtn}
-                onPress={() => onDelete(z)}
-                activeOpacity={0.75}
-              >
-                <Text style={{ fontSize: 16 }}>🗑</Text>
+              <TouchableOpacity style={styles.deleteBtn} onPress={() => onDelete(z)} activeOpacity={0.75}>
+                <FontAwesome6 name="trash" size={14} color={C.red} />
               </TouchableOpacity>
             </View>
           ))}
@@ -929,7 +657,7 @@ function ZonesView({ onBack, onAdd, onImport, onExport, zones, loading, onDelete
   );
 }
 
-// ─── Vue liste utilisateurs ───────────────────────────────────────────────────
+// ── UsersListView ─────────────────────────────────────────────────────────────
 function UsersListView({ onBack, onSelectUser }) {
   const [users,    setUsers]    = useState([]);
   const [loading,  setLoading]  = useState(true);
@@ -940,20 +668,14 @@ function UsersListView({ onBack, onSelectUser }) {
 
   const fetchUsers = useCallback(async (p = 1, q = search, reset = false) => {
     try {
-      const token   = await AsyncStorage.getItem('accessToken');
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
-      const res     = await fetch(`${API_URL}/admin/users?page=${p}&limit=20&search=${encodeURIComponent(q)}`, { headers });
+      const token = await AsyncStorage.getItem('accessToken');
+      const res   = await fetch(`${API_URL}/admin/users?page=${p}&limit=20&search=${encodeURIComponent(q)}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
       if (!res.ok) return;
       const data = await res.json();
       setUsers(prev => reset ? data.users : [...prev, ...data.users]);
-      setHasMore(p < data.pages);
-      setPage(p);
-    } catch {
-      Alert.alert('Erreur', 'Impossible de charger les utilisateurs.');
-    } finally {
-      setLoading(false);
-      setLoadMore(false);
-    }
+      setHasMore(p < data.pages); setPage(p);
+    } catch { Alert.alert('Erreur', 'Impossible de charger les utilisateurs.'); }
+    finally { setLoading(false); setLoadMore(false); }
   }, [search]);
 
   useEffect(() => { setLoading(true); fetchUsers(1, search, true); }, [search]);
@@ -961,141 +683,119 @@ function UsersListView({ onBack, onSelectUser }) {
   const toggleActive = async (user) => {
     try {
       const token = await AsyncStorage.getItem('accessToken');
-      const res   = await fetch(`${API_URL}/admin/users/${user._id}/toggle`, {
-        method: 'PUT',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res   = await fetch(`${API_URL}/admin/users/${user._id}/toggle`, { method: 'PUT', headers: token ? { Authorization: `Bearer ${token}` } : {} });
       if (!res.ok) throw new Error();
-      setUsers(prev => prev.map(u =>
-        u._id === user._id ? { ...u, isActive: !u.isActive } : u
-      ));
-    } catch {
-      Alert.alert('Erreur', 'Impossible de modifier le statut.');
-    }
+      setUsers(prev => prev.map(u => u._id === user._id ? { ...u, isActive: !u.isActive } : u));
+    } catch { Alert.alert('Erreur', 'Impossible de modifier le statut.'); }
   };
 
   const deleteUser = (user) => {
-    Alert.alert(
-      'Supprimer',
-      `Supprimer ${[user.prenom, user.nom].filter(Boolean).join(' ') || user.email} ?`,
-      [
-        { text: 'Annuler', style: 'cancel' },
-        { text: 'Supprimer', style: 'destructive', onPress: async () => {
-          try {
-            const token = await AsyncStorage.getItem('accessToken');
-            const res   = await fetch(`${API_URL}/admin/users/${user._id}`, {
-              method: 'DELETE',
-              headers: token ? { Authorization: `Bearer ${token}` } : {},
-            });
-            if (!res.ok) throw new Error();
-            setUsers(prev => prev.filter(u => u._id !== user._id));
-          } catch {
-            Alert.alert('Erreur', 'Impossible de supprimer.');
-          }
-        }},
-      ]
-    );
+    Alert.alert('Supprimer', `Supprimer ${[user.prenom, user.nom].filter(Boolean).join(' ') || user.email} ?`, [
+      { text: 'Annuler', style: 'cancel' },
+      { text: 'Supprimer', style: 'destructive', onPress: async () => {
+        try {
+          const token = await AsyncStorage.getItem('accessToken');
+          const res   = await fetch(`${API_URL}/admin/users/${user._id}`, { method: 'DELETE', headers: token ? { Authorization: `Bearer ${token}` } : {} });
+          if (!res.ok) throw new Error();
+          setUsers(prev => prev.filter(u => u._id !== user._id));
+        } catch { Alert.alert('Erreur', 'Impossible de supprimer.'); }
+      }},
+    ]);
   };
 
   return (
-    <View style={{ flex: 1 }}>
-      {/* Header */}
-      <View style={styles.ulHeader}>
-        <TouchableOpacity onPress={onBack} style={styles.ulBackBtn} activeOpacity={0.7}>
-          <Text style={styles.ulBackIcon}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.ulTitle}>Utilisateurs</Text>
-        <View style={styles.ulCount}>
-          <Text style={styles.ulCountText}>{users.length}</Text>
+    <View style={{ flex: 1, backgroundColor: C.bg }}>
+      <View style={styles.subHeader}>
+        {!!onBack && (
+          <TouchableOpacity onPress={onBack} style={styles.backBtn} activeOpacity={0.7}>
+            <FontAwesome6 name="arrow-left" size={18} color={C.text} />
+          </TouchableOpacity>
+        )}
+        <FontAwesome6 name="users" size={18} color={C.blue} />
+        <Text style={styles.subHeaderTitle}>Utilisateurs</Text>
+        <View style={[styles.countBadge, { backgroundColor: C.blueGlow }]}>
+          <Text style={[styles.countBadgeText, { color: C.blue }]}>{users.length}</Text>
         </View>
       </View>
 
-      {/* Search */}
-      <View style={styles.ulSearchBox}>
-        <Text style={styles.ulSearchIcon}>🔍</Text>
-        <TextInput
-          style={styles.ulSearchInput}
-          placeholder="Rechercher par nom, email…"
-          placeholderTextColor="#B0B3C6"
-          value={search}
-          onChangeText={setSearch}
-        />
+      <View style={styles.searchBox}>
+        <FontAwesome6 name="magnifying-glass" size={15} color={C.textFaint} />
+        <TextInput style={styles.searchInput} placeholder="Rechercher par nom, email…" placeholderTextColor={C.textFaint} value={search} onChangeText={setSearch} />
         {search.length > 0 && (
-          <TouchableOpacity onPress={() => setSearch('')}>
-            <Text style={styles.ulClear}>✕</Text>
+          <TouchableOpacity onPress={() => setSearch('')} hitSlop={8}>
+            <FontAwesome6 name="xmark" size={14} color={C.textFaint} />
           </TouchableOpacity>
         )}
       </View>
 
-      {/* List */}
       {loading ? (
-        <View style={styles.ulLoader}>
-          <ActivityIndicator size="large" color={C.blue} />
-        </View>
+        <View style={styles.loaderBox}><ActivityIndicator size="large" color={C.green} /></View>
       ) : (
         <ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={styles.ulList}
+          contentContainerStyle={styles.listPad}
           showsVerticalScrollIndicator={false}
           onScroll={({ nativeEvent: e }) => {
             if (!hasMore || loadMore) return;
-            if (e.layoutMeasurement.height + e.contentOffset.y >= e.contentSize.height - 60) {
-              setLoadMore(true);
-              fetchUsers(page + 1, search, false);
-            }
+            if (e.layoutMeasurement.height + e.contentOffset.y >= e.contentSize.height - 60) { setLoadMore(true); fetchUsers(page + 1, search, false); }
           }}
           scrollEventThrottle={200}
         >
           {users.length === 0 && (
-            <View style={styles.ulEmpty}>
-              <Text style={styles.ulEmptyIcon}>👤</Text>
-              <Text style={styles.ulEmptyText}>Aucun utilisateur trouvé</Text>
+            <View style={styles.emptyBox}>
+              <FontAwesome6 name="user" size={52} color="#D1D5DB" />
+              <Text style={styles.emptyTitle}>Aucun utilisateur trouvé</Text>
             </View>
           )}
           {users.map((u) => {
             const name   = [u.prenom, u.nom].filter(Boolean).join(' ') || '—';
-            const initia = name[0]?.toUpperCase() || '?';
+            const initial = name[0]?.toUpperCase() || '?';
             const active = u.isActive !== false;
             return (
-              <TouchableOpacity key={u._id} style={styles.ulCard} onPress={() => onSelectUser(u)} activeOpacity={0.8}>
-                <View style={[styles.ulAvatar, { backgroundColor: active ? C.blueLight : '#F5F5F5' }]}>
-                  <Text style={[styles.ulAvatarText, { color: active ? C.blue : C.grey }]}>{initia}</Text>
-                </View>
-                <View style={styles.ulInfo}>
-                  <Text style={styles.ulName} numberOfLines={1}>{name}</Text>
-                  <Text style={styles.ulEmail} numberOfLines={1}>{u.email || u.phone || '—'}</Text>
-                  <View style={[styles.ulBadge, { backgroundColor: active ? C.green + '22' : C.red + '22' }]}>
-                    <View style={[styles.ulBadgeDot, { backgroundColor: active ? C.green : C.red }]} />
-                    <Text style={[styles.ulBadgeText, { color: active ? C.green : C.red }]}>
-                      {active ? 'Actif' : 'Inactif'}
-                    </Text>
+              <TouchableOpacity key={u._id} style={styles.userCard} onPress={() => onSelectUser(u)} activeOpacity={0.8}>
+                <LinearGradient
+                  colors={active ? [C.green, C.greenDark] : ['#D1D5DB', '#9CA3AF']}
+                  style={styles.userAvatar}
+                >
+                  <Text style={styles.userAvatarText}>{initial}</Text>
+                </LinearGradient>
+                <View style={styles.userInfo}>
+                  <Text style={styles.userName} numberOfLines={1}>{name}</Text>
+                  <Text style={styles.userEmail} numberOfLines={1}>{u.email || u.phone || '—'}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                    <FontAwesome6 name="star" size={10} color={C.orange} />
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: C.orange }}>{u.pointsSolde ?? 100} pts</Text>
+                  </View>
+                  <View style={[styles.userBadge, { backgroundColor: active ? C.greenGlow : C.redGlow }]}>
+                    <View style={[styles.userBadgeDot, { backgroundColor: active ? C.green : C.red }]} />
+                    <Text style={[styles.userBadgeText, { color: active ? C.green : C.red }]}>{active ? 'Actif' : 'Inactif'}</Text>
                   </View>
                 </View>
-                <View style={styles.ulActions}>
+                <View style={styles.userActions}>
                   <TouchableOpacity
-                    style={[styles.ulActionBtn, { backgroundColor: active ? C.orange + '18' : C.green + '18', borderColor: active ? C.orange : C.green }]}
+                    style={[styles.actionIconBtn, { backgroundColor: active ? C.orangeGlow : C.greenGlow, borderColor: active ? C.orange : C.green }]}
                     onPress={(e) => { e.stopPropagation?.(); toggleActive(u); }} activeOpacity={0.75}
                   >
-                    <Text style={{ fontSize: 14 }}>{active ? '🔒' : '🔓'}</Text>
+                    <FontAwesome6 name={active ? 'lock' : 'lock-open'} size={13} color={active ? C.orange : C.green} />
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={[styles.ulActionBtn, { backgroundColor: C.red + '15', borderColor: C.red }]}
+                    style={[styles.actionIconBtn, { backgroundColor: C.redGlow, borderColor: C.red }]}
                     onPress={(e) => { e.stopPropagation?.(); deleteUser(u); }} activeOpacity={0.75}
                   >
-                    <Text style={{ fontSize: 14 }}>🗑</Text>
+                    <FontAwesome6 name="trash" size={13} color={C.red} />
                   </TouchableOpacity>
                 </View>
               </TouchableOpacity>
             );
           })}
-          {loadMore && <ActivityIndicator color={C.blue} style={{ marginVertical: 12 }} />}
+          {loadMore && <ActivityIndicator color={C.green} style={{ marginVertical: 12 }} />}
         </ScrollView>
       )}
     </View>
   );
 }
 
-// ─── Vue publications d'un utilisateur ───────────────────────────────────────
+// ── UserPostsView ─────────────────────────────────────────────────────────────
 function UserPostsView({ user, onBack }) {
   const [posts,   setPosts]   = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1104,69 +804,73 @@ function UserPostsView({ user, onBack }) {
     (async () => {
       try {
         const token = await AsyncStorage.getItem('accessToken');
-        const headers = token ? { Authorization: `Bearer ${token}` } : {};
-        const res = await fetch(`${API_URL}/publications?auteur=${user._id}&limit=50`, { headers });
-        if (res.ok) {
-          const data = await res.json();
-          setPosts(data.publications || data.pubs || data.data || []);
-        }
-      } catch {
-        Alert.alert('Erreur', 'Impossible de charger les publications.');
-      } finally {
-        setLoading(false);
-      }
+        const res = await fetch(`${API_URL}/publications?auteur=${user._id}&limit=50`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+        if (res.ok) { const data = await res.json(); setPosts(data.publications || data.pubs || data.data || []); }
+      } catch { Alert.alert('Erreur', 'Impossible de charger les publications.'); }
+      finally { setLoading(false); }
     })();
   }, [user._id]);
 
   const name = [user.prenom, user.nom].filter(Boolean).join(' ') || user.email || '—';
 
   return (
-    <View style={{ flex: 1 }}>
-      {/* Header */}
-      <View style={styles.ulHeader}>
-        <TouchableOpacity onPress={onBack} style={styles.ulBackBtn} activeOpacity={0.7}>
-          <Text style={styles.ulBackIcon}>←</Text>
+    <View style={{ flex: 1, backgroundColor: C.bg }}>
+      <View style={styles.subHeader}>
+        <TouchableOpacity onPress={onBack} style={styles.backBtn} activeOpacity={0.7}>
+          <FontAwesome6 name="arrow-left" size={18} color={C.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={styles.ulTitle} numberOfLines={1}>{name}</Text>
-          <Text style={styles.upSubtitle}>Publications</Text>
+          <Text style={styles.subHeaderTitle} numberOfLines={1}>{name}</Text>
+          <Text style={styles.subHeaderSub}>Publications</Text>
         </View>
-        <View style={styles.ulCount}>
-          <Text style={styles.ulCountText}>{posts.length}</Text>
+        <View style={styles.countBadge}>
+          <Text style={styles.countBadgeText}>{posts.length}</Text>
         </View>
       </View>
 
       {loading ? (
-        <View style={styles.ulLoader}>
-          <ActivityIndicator size="large" color={C.blue} />
-        </View>
+        <View style={styles.loaderBox}><ActivityIndicator size="large" color={C.green} /></View>
       ) : posts.length === 0 ? (
-        <View style={styles.ulEmpty}>
-          <Text style={styles.ulEmptyIcon}>📭</Text>
-          <Text style={styles.ulEmptyText}>Aucune publication</Text>
+        <View style={styles.emptyBox}>
+          <FontAwesome6 name="inbox" size={56} color="#D1D5DB" />
+          <Text style={styles.emptyTitle}>Aucune publication</Text>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.upList} showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={styles.listPad} showsVerticalScrollIndicator={false}>
           {posts.map((p) => {
             const isLocal = p.mode === 'local';
             const accent  = isLocal ? C.green : C.blue;
+            const glow    = isLocal ? C.greenGlow : C.blueGlow;
             const loc     = isLocal
               ? [p.localisation?.ville, p.localisation?.gouvernorat].filter(Boolean).join(', ')
               : [p.localisationDebut?.ville, '→', p.localisationFin?.ville].filter(Boolean).join(' ');
             const date = p.createdAt ? new Date(p.createdAt).toLocaleDateString('fr-FR') : '';
             return (
-              <View key={p._id} style={styles.upCard}>
-                <View style={styles.upCardLeft}>
-                  <View style={[styles.upModeBadge, { backgroundColor: accent + '20', borderColor: accent }]}>
-                    <Text style={[styles.upModeText, { color: accent }]}>{isLocal ? '📍 LOCAL' : '🤝 DUO'}</Text>
+              <View key={p._id} style={styles.postCard}>
+                <View style={[styles.postAccentBar, { backgroundColor: accent }]} />
+                <View style={{ flex: 1 }}>
+                  <View style={[styles.postModeBadge, { backgroundColor: glow, borderColor: accent }]}>
+                    <View style={[styles.postModeDot, { backgroundColor: accent }]} />
+                    <Text style={[styles.postModeText, { color: accent }]}>{isLocal ? 'LOCAL' : 'DUO'}</Text>
                   </View>
-                  <Text style={styles.upDesc} numberOfLines={2}>{p.description || '—'}</Text>
-                  {!!loc && <Text style={styles.upLoc} numberOfLines={1}>📍 {loc}</Text>}
+                  <Text style={styles.postDesc} numberOfLines={2}>{p.description || '—'}</Text>
+                  {!!loc && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                      <FontAwesome6 name="location-dot" size={11} color={C.textFaint} />
+                      <Text style={styles.postLoc} numberOfLines={1}>{loc}</Text>
+                    </View>
+                  )}
                 </View>
-                <View style={styles.upCardRight}>
-                  <Text style={styles.upDate}>{date}</Text>
-                  <Text style={styles.upLikes}>❤️ {p.nbLikes ?? p.likes?.length ?? 0}</Text>
-                  <Text style={styles.upViews}>👁 {p.vues ?? 0}</Text>
+                <View style={styles.postMeta}>
+                  <Text style={styles.postDate}>{date}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                    <FontAwesome6 name="heart" size={11} color={C.red} />
+                    <Text style={styles.postStat}>{p.nbLikes ?? p.likes?.length ?? 0}</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                    <FontAwesome6 name="eye" size={11} color={C.textFaint} />
+                    <Text style={styles.postStat}>{p.vues ?? 0}</Text>
+                  </View>
                 </View>
               </View>
             );
@@ -1177,45 +881,229 @@ function UserPostsView({ user, onBack }) {
   );
 }
 
-// ─── Composant principal ──────────────────────────────────────────────────────
+// ── Navbar tabs config ────────────────────────────────────────────────────────
+const NAV_TABS = [
+  { key: 'zones',        label: 'Zones',    icon: 'map'       },
+  { key: 'users',        label: 'Membres',  icon: 'users'     },
+  { key: 'publications', label: 'Posts',    icon: 'newspaper' },
+  { key: 'parametres',   label: 'Réglages', icon: 'gear'      },
+];
+
+// ── BottomNavbar ──────────────────────────────────────────────────────────────
+const BottomNavbar = ({ active, onPress }) => (
+  <View style={nb.bar}>
+    {NAV_TABS.map(tab => {
+      const isActive = active === tab.key;
+      return (
+        <TouchableOpacity key={tab.key} style={nb.item} onPress={() => onPress(tab.key)} activeOpacity={0.7}>
+          {isActive && <View style={nb.indicator} />}
+          <View style={[nb.iconBox, isActive && nb.iconBoxActive]}>
+            <FontAwesome6 name={tab.icon} size={19} color={isActive ? C.green : C.textFaint} />
+          </View>
+          <Text style={[nb.label, isActive && nb.labelActive]}>{tab.label}</Text>
+        </TouchableOpacity>
+      );
+    })}
+  </View>
+);
+
+const nb = StyleSheet.create({
+  bar:          { flexDirection: 'row', backgroundColor: C.white, borderTopWidth: 1, borderTopColor: C.borderLight, shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.07, shadowRadius: 12, elevation: 12, paddingBottom: 6 },
+  item:         { flex: 1, alignItems: 'center', paddingTop: 6, paddingBottom: 2, position: 'relative' },
+  indicator:    { position: 'absolute', top: 0, width: 32, height: 3, borderRadius: 1.5, backgroundColor: C.green },
+  iconBox:      { width: 42, height: 32, justifyContent: 'center', alignItems: 'center', borderRadius: 12 },
+  iconBoxActive:{ backgroundColor: C.greenGlow },
+  label:        { fontSize: 10, fontWeight: '600', color: C.textFaint, marginTop: 2 },
+  labelActive:  { color: C.green, fontWeight: '800' },
+});
+
+// ── PublicationsView ──────────────────────────────────────────────────────────
+function PublicationsView() {
+  const [posts,   setPosts]   = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search,  setSearch]  = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = await AsyncStorage.getItem('accessToken');
+        const res = await fetch(`${API_URL}/publications?limit=80`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+        if (res.ok) { const d = await res.json(); setPosts(d.publications || d.pubs || d.data || []); }
+      } catch {}
+      finally { setLoading(false); }
+    })();
+  }, []);
+
+  const deletePost = async (p) => {
+    Alert.alert('Supprimer', 'Supprimer cette publication ?', [
+      { text: 'Annuler', style: 'cancel' },
+      { text: 'Supprimer', style: 'destructive', onPress: async () => {
+        try {
+          const token = await AsyncStorage.getItem('accessToken');
+          const res = await fetch(`${API_URL}/publications/${p._id}`, {
+            method: 'DELETE',
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          if (res.ok) {
+            setPosts(prev => prev.filter(x => x._id !== p._id));
+          } else {
+            Alert.alert('Erreur', 'Impossible de supprimer.');
+          }
+        } catch { Alert.alert('Erreur', 'Impossible de supprimer.'); }
+      }},
+    ]);
+  };
+
+  const filtered = search.trim()
+    ? posts.filter(p => (p.description || '').toLowerCase().includes(search.toLowerCase()))
+    : posts;
+
+  return (
+    <View style={{ flex: 1, backgroundColor: C.bg }}>
+      <View style={styles.subHeader}>
+        <FontAwesome6 name="newspaper" size={18} color={C.orange} />
+        <Text style={styles.subHeaderTitle}>Publications</Text>
+        <View style={[styles.countBadge, { backgroundColor: C.orangeGlow }]}>
+          <Text style={[styles.countBadgeText, { color: C.orange }]}>{posts.length}</Text>
+        </View>
+      </View>
+      <View style={styles.searchBox}>
+        <FontAwesome6 name="magnifying-glass" size={15} color={C.textFaint} />
+        <TextInput style={styles.searchInput} placeholder="Rechercher…" placeholderTextColor={C.textFaint} value={search} onChangeText={setSearch} />
+        {search.length > 0 && <TouchableOpacity onPress={() => setSearch('')} hitSlop={8}><FontAwesome6 name="xmark" size={14} color={C.textFaint} /></TouchableOpacity>}
+      </View>
+      {loading ? (
+        <View style={styles.loaderBox}><ActivityIndicator size="large" color={C.orange} /></View>
+      ) : filtered.length === 0 ? (
+        <View style={styles.emptyBox}>
+          <FontAwesome6 name="newspaper" size={52} color="#D1D5DB" />
+          <Text style={styles.emptyTitle}>Aucune publication</Text>
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.listPad} showsVerticalScrollIndicator={false}>
+          {filtered.map((p) => {
+            const isLocal = p.mode === 'local';
+            const accent  = isLocal ? C.green : C.blue;
+            const glow    = isLocal ? C.greenGlow : C.blueGlow;
+            return (
+              <View key={p._id} style={styles.postCard}>
+                <View style={[styles.postAccentBar, { backgroundColor: accent }]} />
+                <View style={{ flex: 1 }}>
+                  <View style={[styles.postModeBadge, { backgroundColor: glow, borderColor: accent }]}>
+                    <View style={[styles.postModeDot, { backgroundColor: accent }]} />
+                    <Text style={[styles.postModeText, { color: accent }]}>{isLocal ? 'LOCAL' : 'DUO'}</Text>
+                  </View>
+                  <Text style={styles.postDesc} numberOfLines={2}>{p.description || '—'}</Text>
+                </View>
+                <View style={styles.postMeta}>
+                  <Text style={styles.postDate}>{p.createdAt ? new Date(p.createdAt).toLocaleDateString('fr-FR') : ''}</Text>
+                  <View style={{ flexDirection: 'row', gap: 3, alignItems: 'center' }}>
+                    <FontAwesome6 name="heart" size={11} color={C.red} />
+                    <Text style={styles.postStat}>{p.nbLikes ?? 0}</Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => deletePost(p)}
+                    hitSlop={8}
+                    style={{ padding: 4, borderRadius: 6, backgroundColor: C.redGlow }}
+                  >
+                    <FontAwesome6 name="trash" size={12} color={C.red} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })}
+        </ScrollView>
+      )}
+    </View>
+  );
+}
+
+// ── ParametresView ────────────────────────────────────────────────────────────
+function ParametresView({ stats, statsLoading, onImportTunisia, importingTunisia, onLogout }) {
+  return (
+    <View style={{ flex: 1, backgroundColor: C.bg }}>
+      <View style={styles.subHeader}>
+        <FontAwesome6 name="gear" size={18} color={C.textDim} />
+        <Text style={styles.subHeaderTitle}>Paramètres</Text>
+      </View>
+      <ScrollView contentContainerStyle={[styles.listPad, { paddingTop: 16 }]} showsVerticalScrollIndicator={false}>
+        <LinearGradient colors={[C.green, C.greenDark]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.welcomeCard}>
+          <View style={styles.welcomeLeft}>
+            <Text style={styles.welcomeTitle}>Vue d'ensemble</Text>
+            <Text style={styles.welcomeSub}>Aperçu de l'activité ByMap</Text>
+          </View>
+          <View style={styles.welcomeIconBox}>
+            <FontAwesome6 name="shield-halved" size={36} color="rgba(255,255,255,0.25)" />
+          </View>
+        </LinearGradient>
+
+        <Text style={styles.sectionTitle}>Statistiques</Text>
+        {statsLoading ? (
+          <ActivityIndicator color={C.green} />
+        ) : (
+          <View style={styles.statsRow}>
+            {STAT_CONFIG.map((cfg) => (
+              <StatCard key={cfg.key} label={cfg.label} value={stats ? String(stats[cfg.key] ?? 0) : '—'} icon={cfg.icon} color={cfg.color} glow={cfg.glow} />
+            ))}
+          </View>
+        )}
+
+        <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Base de données</Text>
+        <TouchableOpacity style={styles.quickCard} onPress={onImportTunisia} activeOpacity={0.82} disabled={importingTunisia}>
+          <View style={[styles.quickCardIcon, { backgroundColor: C.orangeGlow }]}>
+            {importingTunisia ? <ActivityIndicator size="small" color={C.orange} /> : <FontAwesome6 name="file-import" size={22} color={C.orange} />}
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.quickCardTitle}>Importer Tunisia.json</Text>
+            <Text style={styles.quickCardSub}>Réimporter les 4 868 localités</Text>
+          </View>
+          <FontAwesome6 name="chevron-right" size={13} color={C.textFaint} />
+        </TouchableOpacity>
+
+        <Text style={[styles.sectionTitle, { marginTop: 4 }]}>Compte</Text>
+        <TouchableOpacity style={[styles.quickCard, { borderColor: 'rgba(239,68,68,0.2)' }]} onPress={onLogout} activeOpacity={0.82}>
+          <View style={[styles.quickCardIcon, { backgroundColor: C.redGlow }]}>
+            <FontAwesome6 name="right-from-bracket" size={22} color={C.red} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.quickCardTitle, { color: C.red }]}>Déconnexion</Text>
+            <Text style={styles.quickCardSub}>Quitter le panneau admin</Text>
+          </View>
+          <FontAwesome6 name="chevron-right" size={13} color={C.textFaint} />
+        </TouchableOpacity>
+
+        <View style={{ height: 48 }} />
+      </ScrollView>
+    </View>
+  );
+}
+
+// ── AdminDashboard principal ───────────────────────────────────────────────────
 export default function AdminDashboard() {
   const navigation = useNavigation();
   const route      = useRoute();
 
-  const [view,             setView]             = useState('dashboard'); // 'dashboard' | 'users' | 'userPosts' | 'zones'
-  const [selectedUser,     setSelectedUser]     = useState(null);
-  const [modalVisible,     setModalVisible]     = useState(false);
-  const [pickedCoords,     setPickedCoords]     = useState(null);
-  const [zoneModalVisible, setZoneModalVisible] = useState(false);
-  const [zonePickedCoords, setZonePickedCoords] = useState(null);
-  const [zones,            setZones]            = useState([]);
-  const [zonesLoading,     setZonesLoading]     = useState(false);
-  const [importModalVisible,  setImportModalVisible]  = useState(false);
-  const [importingTunisia,    setImportingTunisia]    = useState(false);
-  const [stats,            setStats]            = useState(null);
-  const [statsLoading,     setStatsLoading]     = useState(true);
-  const [refreshing,       setRefreshing]       = useState(false);
-  const [recentUsers,      setRecentUsers]      = useState([]);
+  const [view,              setView]              = useState('zones');
+  const [selectedUser,      setSelectedUser]      = useState(null);
+  const [modalVisible,      setModalVisible]      = useState(false);
+  const [pickedCoords,      setPickedCoords]      = useState(null);
+  const [zoneModalVisible,  setZoneModalVisible]  = useState(false);
+  const [zonePickedCoords,  setZonePickedCoords]  = useState(null);
+  const [zones,             setZones]             = useState([]);
+  const [zonesLoading,      setZonesLoading]      = useState(false);
+  const [importModal,       setImportModal]       = useState(false);
+  const [importingTunisia,  setImportingTunisia]  = useState(false);
+  const [stats,             setStats]             = useState(null);
+  const [statsLoading,      setStatsLoading]      = useState(true);
 
   const fetchStats = useCallback(async () => {
     try {
       const token = await AsyncStorage.getItem('accessToken');
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
-      const [statsRes, usersRes] = await Promise.all([
-        fetch(`${API_URL}/admin/stats`,       { headers }),
-        fetch(`${API_URL}/admin/users?limit=5`, { headers }),
-      ]);
+      const [statsRes] = await Promise.all([fetch(`${API_URL}/admin/stats`, { headers })]);
       if (statsRes.ok) setStats(await statsRes.json());
-      if (usersRes.ok) {
-        const data = await usersRes.json();
-        setRecentUsers(data.users || []);
-      }
-    } catch {
-      Alert.alert('Erreur', 'Impossible de charger les statistiques.');
-    } finally {
-      setStatsLoading(false);
-      setRefreshing(false);
-    }
+    } catch { Alert.alert('Erreur', 'Impossible de charger les statistiques.'); }
+    finally { setStatsLoading(false); }
   }, []);
 
   useEffect(() => { fetchStats(); }, [fetchStats]);
@@ -1224,20 +1112,13 @@ export default function AdminDashboard() {
     setZonesLoading(true);
     try {
       const token = await AsyncStorage.getItem('accessToken');
-      const res   = await fetch(`${API_URL}/admin/zones`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res   = await fetch(`${API_URL}/admin/zones`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
       if (res.ok) { const data = await res.json(); setZones(data.zones || []); }
-    } catch {
-      Alert.alert('Erreur', 'Impossible de charger les zones.');
-    } finally {
-      setZonesLoading(false);
-    }
+    } catch { Alert.alert('Erreur', 'Impossible de charger les zones.'); }
+    finally { setZonesLoading(false); }
   }, []);
 
-  useEffect(() => {
-    if (view === 'zones') fetchZones();
-  }, [view, fetchZones]);
+  useEffect(() => { if (view === 'zones') fetchZones(); }, [view, fetchZones]);
 
   const handleDeleteZone = (zone) => {
     Alert.alert('Supprimer', `Supprimer la zone "${zone.name}" ?`, [
@@ -1245,15 +1126,10 @@ export default function AdminDashboard() {
       { text: 'Supprimer', style: 'destructive', onPress: async () => {
         try {
           const token = await AsyncStorage.getItem('accessToken');
-          const res   = await fetch(`${API_URL}/admin/zones/${zone._id}`, {
-            method: 'DELETE',
-            headers: token ? { Authorization: `Bearer ${token}` } : {},
-          });
+          const res   = await fetch(`${API_URL}/admin/zones/${zone._id}`, { method: 'DELETE', headers: token ? { Authorization: `Bearer ${token}` } : {} });
           if (!res.ok) throw new Error();
           setZones(prev => prev.filter(z => z._id !== zone._id));
-        } catch {
-          Alert.alert('Erreur', 'Impossible de supprimer la zone.');
-        }
+        } catch { Alert.alert('Erreur', 'Impossible de supprimer la zone.'); }
       }},
     ]);
   };
@@ -1263,469 +1139,335 @@ export default function AdminDashboard() {
     (async () => {
       const target = await AsyncStorage.getItem('adminPickTarget') || 'lieu';
       await AsyncStorage.removeItem('adminPickTarget');
-      if (target === 'zone') {
-        setZonePickedCoords(route.params.pickedCoords);
-        setView('zones');
-        setZoneModalVisible(true);
-      } else {
-        setPickedCoords(route.params.pickedCoords);
-        setModalVisible(true);
-      }
+      if (target === 'zone') { setZonePickedCoords(route.params.pickedCoords); setView('zones'); setZoneModalVisible(true); }
+      else { setPickedCoords(route.params.pickedCoords); setModalVisible(true); }
     })();
   }, [route?.params?.pickedCoords]);
 
   const handleImportTunisia = () => {
-    Alert.alert(
-      '🇹🇳 Importer Tunisia.json',
-      'Cela va effacer et réimporter toutes les localités (4 868 entrées) depuis tunisia.json. Continuer ?',
-      [
-        { text: 'Annuler', style: 'cancel' },
-        { text: 'Importer', onPress: async () => {
-          setImportingTunisia(true);
-          try {
-            const token = await AsyncStorage.getItem('accessToken');
-            const res = await fetch(`${API_URL}/admin/localites/import`, {
-              method: 'POST',
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.message || 'Erreur serveur');
-            Alert.alert('✅ Import réussi', `${data.imported} localités importées en base.`);
-          } catch (e) {
-            Alert.alert('Erreur', e.message || 'Impossible d\'importer.');
-          } finally {
-            setImportingTunisia(false);
-          }
-        }},
-      ]
-    );
+    Alert.alert('Importer Tunisia.json', 'Cela va réimporter toutes les localités (4 868 entrées). Continuer ?', [
+      { text: 'Annuler', style: 'cancel' },
+      { text: 'Importer', onPress: async () => {
+        setImportingTunisia(true);
+        try {
+          const token = await AsyncStorage.getItem('accessToken');
+          const res = await fetch(`${API_URL}/admin/localites/import`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.message || 'Erreur serveur');
+          Alert.alert('Import réussi', `${data.imported} localités importées en base.`);
+        } catch (e) { Alert.alert('Erreur', e.message || "Impossible d'importer."); }
+        finally { setImportingTunisia(false); }
+      }},
+    ]);
   };
 
   const handleExportZones = async () => {
-    if (zones.length === 0) { Alert.alert('Aucune zone', 'Il n\'y a aucune zone à exporter.'); return; }
-    try {
-      await Share.share({
-        message: JSON.stringify(zones, null, 2),
-        title: 'zones_bymap.json',
-      });
-    } catch {
-      Alert.alert('Erreur', 'Impossible d\'exporter les zones.');
-    }
+    if (zones.length === 0) { Alert.alert('Aucune zone', "Il n'y a aucune zone à exporter."); return; }
+    try { await Share.share({ message: JSON.stringify(zones, null, 2), title: 'zones_bymap.json' }); }
+    catch { Alert.alert('Erreur', "Impossible d'exporter les zones."); }
   };
 
   const handleImportZones = async (parsedZones) => {
     const token = await AsyncStorage.getItem('accessToken');
     const res = await fetch(`${API_URL}/admin/zones/bulk`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify({ zones: parsedZones }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.message || 'Erreur serveur');
-    Alert.alert('Import réussi ✅', `${data.imported} zone(s) importée(s) sur ${data.total}.`);
+    Alert.alert('Import réussi', `${data.imported} zone(s) importée(s) sur ${data.total}.`);
     fetchZones();
   };
 
   const handleLogout = () => {
-    Alert.alert(
-      'Déconnexion',
-      'Voulez-vous vous déconnecter du panneau admin ?',
-      [
-        { text: 'Annuler', style: 'cancel' },
-        { text: 'Déconnexion', style: 'destructive', onPress: () => navigation.replace('Login') },
-      ]
-    );
+    Alert.alert('Déconnexion', 'Voulez-vous vous déconnecter du panneau admin ?', [
+      { text: 'Annuler', style: 'cancel' },
+      { text: 'Déconnexion', style: 'destructive', onPress: () => navigation.replace('Login') },
+    ]);
   };
+
 
   return (
     <SafeAreaView style={styles.safe}>
-      <StatusBar style="light" />
+      <StatusBar style="dark" />
 
-      <AddLieuModal
-        visible={modalVisible}
-        onClose={() => { setModalVisible(false); setPickedCoords(null); }}
-        navigation={navigation}
-        initialCoords={pickedCoords}
-      />
+      <AddLieuModal visible={modalVisible} onClose={() => { setModalVisible(false); setPickedCoords(null); }} navigation={navigation} initialCoords={pickedCoords} />
+      <AddZoneModal visible={zoneModalVisible} onClose={() => { setZoneModalVisible(false); setZonePickedCoords(null); }} navigation={navigation} initialCoords={zonePickedCoords} onSaved={(zone) => setZones(prev => [zone, ...prev])} />
+      <ImportJsonModal visible={importModal} onClose={() => setImportModal(false)} onImport={handleImportZones} />
 
-      <AddZoneModal
-        visible={zoneModalVisible}
-        onClose={() => { setZoneModalVisible(false); setZonePickedCoords(null); }}
-        navigation={navigation}
-        initialCoords={zonePickedCoords}
-        onSaved={(zone) => setZones(prev => [zone, ...prev])}
-      />
-
-      <ImportJsonModal
-        visible={importModalVisible}
-        onClose={() => setImportModalVisible(false)}
-        onImport={handleImportZones}
-      />
-
-      {/* ── Top Bar ── */}
-      <View style={styles.topBar}>
+      {/* ── Header ── */}
+      <View style={styles.header}>
+        <LinearGradient colors={[C.green, C.greenDark]} style={styles.headerLogo}>
+          <FontAwesome6 name="shield-halved" size={16} color="#FFFFFF" />
+        </LinearGradient>
         <View>
-          <Text style={styles.topBarTitle}>🛡️ Admin Panel</Text>
-          <Text style={styles.topBarSub}>ByMap — Tableau de bord</Text>
+          <Text style={styles.headerTitle}>Admin Panel</Text>
+          <Text style={styles.headerSub}>ByMap — Tableau de bord</Text>
         </View>
-        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout} activeOpacity={0.8}>
-          <Text style={styles.logoutText}>Déconnexion</Text>
-        </TouchableOpacity>
       </View>
 
-      {/* ── Vue utilisateurs ── */}
-      {view === 'users' && (
-        <UsersListView
-          onBack={() => setView('dashboard')}
-          onSelectUser={(u) => { setSelectedUser(u); setView('userPosts'); }}
-        />
-      )}
+      {/* ── Contenu par onglet ── */}
+      <View style={{ flex: 1 }}>
+        {view === 'zones'        && <ZonesView onBack={null} onAdd={() => setZoneModalVisible(true)} onImport={() => setImportModal(true)} onExport={handleExportZones} zones={zones} loading={zonesLoading} onDelete={handleDeleteZone} />}
+        {view === 'users'        && <UsersListView onBack={null} onSelectUser={(u) => { setSelectedUser(u); setView('userPosts'); }} />}
+        {view === 'publications' && <PublicationsView />}
+        {view === 'parametres'   && <ParametresView stats={stats} statsLoading={statsLoading} onImportTunisia={handleImportTunisia} importingTunisia={importingTunisia} onLogout={handleLogout} />}
+        {view === 'userPosts'    && selectedUser && <UserPostsView user={selectedUser} onBack={() => setView('users')} />}
+      </View>
 
-      {/* ── Vue zones ── */}
-      {view === 'zones' && (
-        <ZonesView
-          onBack={() => setView('dashboard')}
-          onAdd={() => setZoneModalVisible(true)}
-          onImport={() => setImportModalVisible(true)}
-          onExport={handleExportZones}
-          zones={zones}
-          loading={zonesLoading}
-          onDelete={handleDeleteZone}
-        />
-      )}
-
-      {/* ── Vue publications d'un user ── */}
-      {view === 'userPosts' && selectedUser && (
-        <UserPostsView
-          user={selectedUser}
-          onBack={() => setView('users')}
-        />
-      )}
-
-      {/* ── Dashboard principal ── */}
-      {view === 'dashboard' && (
-      <ScrollView
-        style={styles.content}
-        showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchStats(); }} tintColor={C.blue} />}
-      >
-        <View style={styles.welcomeBox}>
-          <Text style={styles.welcomeTitle}>Bienvenue, Admin 👋</Text>
-          <Text style={styles.welcomeSub}>Voici un aperçu de l'activité de la plateforme ByMap.</Text>
-        </View>
-
-        {/* ── Stats ── */}
-        <Text style={styles.sectionTitle}>Vue d'ensemble</Text>
-        {statsLoading ? (
-          <View style={styles.statsLoading}>
-            <ActivityIndicator size="large" color={C.blue} />
-          </View>
-        ) : (
-          <View style={styles.statsGrid}>
-            {STAT_CONFIG.map((cfg) => (
-              <StatCard
-                key={cfg.key}
-                label={cfg.label}
-                value={stats ? String(stats[cfg.key] ?? 0) : '—'}
-                icon={cfg.icon}
-                color={cfg.color}
-                bg={cfg.bg}
-                onPress={cfg.key === 'totalUsers' ? () => setView('users') : undefined}
-              />
-            ))}
-          </View>
-        )}
-
-        {/* ── Zones ── */}
-        <Text style={styles.sectionTitle}>Carte & Zones</Text>
-        <TouchableOpacity style={styles.zoneQuickCard} onPress={() => setView('zones')} activeOpacity={0.82}>
-          <View style={styles.zoneQuickIcon}>
-            <Text style={{ fontSize: 24 }}>🗺️</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.zoneQuickTitle}>Gestion des zones</Text>
-            <Text style={styles.zoneQuickSub}>Ajouter ou supprimer des zones sur la carte</Text>
-          </View>
-          <Text style={styles.zoneQuickArrow}>→</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.zoneQuickCard, { marginTop: 10 }]}
-          onPress={() => setModalVisible(true)}
-          activeOpacity={0.82}
-        >
-          <View style={[styles.zoneQuickIcon, { backgroundColor: '#E8FAF0' }]}>
-            <Text style={{ fontSize: 24 }}>📍</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.zoneQuickTitle}>Ajouter un lieu</Text>
-            <Text style={styles.zoneQuickSub}>Épingler un lieu sur la carte</Text>
-          </View>
-          <Text style={styles.zoneQuickArrow}>→</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.zoneQuickCard, { marginTop: 10, opacity: importingTunisia ? 0.6 : 1 }]}
-          onPress={handleImportTunisia}
-          activeOpacity={0.82}
-          disabled={importingTunisia}
-        >
-          <View style={[styles.zoneQuickIcon, { backgroundColor: '#FFF4E5' }]}>
-            {importingTunisia
-              ? <ActivityIndicator color={C.orange} />
-              : <Text style={{ fontSize: 24 }}>🇹🇳</Text>}
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.zoneQuickTitle}>Importer Tunisia.json</Text>
-            <Text style={styles.zoneQuickSub}>Charger les 4 868 localités en base de données</Text>
-          </View>
-          <Text style={[styles.zoneQuickArrow, { color: C.orange }]}>→</Text>
-        </TouchableOpacity>
-
-        <View style={{ height: 40 }} />
-      </ScrollView>
-      )}
-
+      {/* ── Bottom Navbar (masquée sur vues imbriquées) ── */}
+      {view !== 'userPosts' && <BottomNavbar active={view} onPress={setView} />}
     </SafeAreaView>
   );
 }
 
-// ─── Styles principaux ────────────────────────────────────────────────────────
+// ── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: C.greyDark },
-  topBar: {
-    backgroundColor: C.greyDark,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  safe:    { flex: 1, backgroundColor: C.bg },
+  content: { flex: 1, backgroundColor: C.bg, paddingHorizontal: 16 },
+
+  // Header (calqué sur LocalScreen)
+  header: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 14, paddingVertical: 12,
+    backgroundColor: C.white,
+    borderBottomWidth: 1, borderBottomColor: C.borderLight,
+    gap: 10,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06, shadowRadius: 8, elevation: 4,
   },
-  topBarTitle: { fontSize: 18, fontWeight: '800', color: C.white, letterSpacing: -0.3 },
-  topBarSub:   { fontSize: 12, color: '#8A8B9E', marginTop: 2 },
+  headerLogo: { width: 38, height: 38, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  headerTitle: { fontSize: 17, fontWeight: '800', color: C.text, letterSpacing: -0.3 },
+  headerSub:   { fontSize: 11, color: C.textFaint, marginTop: 1 },
   logoutBtn: {
-    backgroundColor: C.red + '22',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: C.red + '55',
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: C.redGlow, paddingHorizontal: 12, paddingVertical: 8,
+    borderRadius: 12, borderWidth: 1, borderColor: 'rgba(239,68,68,0.25)',
   },
   logoutText: { color: C.red, fontWeight: '700', fontSize: 13 },
-  content:    { flex: 1, backgroundColor: C.greyLight, paddingHorizontal: 16 },
-  welcomeBox: {
-    marginTop: 20, marginBottom: 8, padding: 18,
-    backgroundColor: C.blue, borderRadius: 16,
-    shadowColor: C.blue, shadowOffset: { width: 0, height: 6 },
+
+  // Sub-header (vues secondaires — même style que LocalScreen header)
+  subHeader: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 14, paddingVertical: 12, gap: 10,
+    backgroundColor: C.white,
+    borderBottomWidth: 1, borderBottomColor: C.borderLight,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06, shadowRadius: 8, elevation: 4,
+  },
+  backBtn: {
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: C.border,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  subHeaderTitle: { flex: 1, fontSize: 17, fontWeight: '800', color: C.text, letterSpacing: -0.3 },
+  subHeaderSub:   { fontSize: 11, color: C.textFaint },
+  countBadge:     { backgroundColor: C.greenGlow, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 3 },
+  countBadgeText: { fontSize: 12, fontWeight: '800', color: C.green },
+
+  // Welcome card
+  welcomeCard: {
+    flexDirection: 'row', alignItems: 'center',
+    borderRadius: 20, padding: 20, marginTop: 20, marginBottom: 4,
+    overflow: 'hidden',
+    shadowColor: C.green, shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.3, shadowRadius: 12, elevation: 6,
   },
-  welcomeTitle: { fontSize: 20, fontWeight: '800', color: C.white },
-  welcomeSub:   { fontSize: 13, color: '#D0E8FF', marginTop: 4 },
-  sectionTitle:  { fontSize: 16, fontWeight: '800', color: C.greyDark, marginTop: 20, marginBottom: 12 },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 12 },
-  seeAll:        { fontSize: 13, color: C.blue, fontWeight: '600' },
-  statsLoading:  { paddingVertical: 32, alignItems: 'center' },
-  statsGrid:     { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  welcomeLeft:    { flex: 1 },
+  welcomeTitle:   { fontSize: 20, fontWeight: '800', color: '#FFFFFF' },
+  welcomeSub:     { fontSize: 13, color: 'rgba(255,255,255,0.75)', marginTop: 4 },
+  welcomeIconBox: { justifyContent: 'center', alignItems: 'center' },
+
+  // Section title (même que LocalScreen)
+  sectionTitle: { fontSize: 16, fontWeight: '800', color: C.text, marginTop: 20, marginBottom: 12 },
+
+  // Stats
+  statsRow: { flexDirection: 'row', gap: 12 },
   statCard: {
-    width: (width - 44) / 2, padding: 16, borderRadius: 14, borderLeftWidth: 4,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06, shadowRadius: 6, elevation: 2,
+    flex: 1, backgroundColor: C.white,
+    borderRadius: 16, borderTopWidth: 3, padding: 14, gap: 6,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.07, shadowRadius: 16, elevation: 4,
   },
-  statIcon:  { fontSize: 22, marginBottom: 8 },
-  statValue: { fontSize: 24, fontWeight: '800', letterSpacing: -0.5 },
-  statLabel: { fontSize: 12, color: C.grey, marginTop: 2, fontWeight: '600' },
-  statArrow: { fontSize: 12, fontWeight: '800', marginTop: 6, alignSelf: 'flex-end' },
+  statIconBox:  { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center', alignSelf: 'flex-start' },
+  statValue:    { fontSize: 22, fontWeight: '800', letterSpacing: -0.5, marginTop: 4 },
+  statLabel:    { fontSize: 11, color: C.textDim, fontWeight: '600' },
+  statArrow:    { width: 24, height: 24, borderRadius: 8, justifyContent: 'center', alignItems: 'center', alignSelf: 'flex-end', marginTop: 4 },
 
-  // ── UsersListView ─────────────────────────────────────────────────────────
-  ulHeader:    { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 14, backgroundColor: C.greyDark },
-  ulBackBtn:   { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
-  ulBackIcon:  { fontSize: 18, color: C.white, fontWeight: '700' },
-  ulTitle:     { fontSize: 18, fontWeight: '800', color: C.white, flex: 1 },
-  ulCount:     { backgroundColor: C.blue, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 3 },
-  ulCountText: { fontSize: 12, fontWeight: '800', color: C.white },
-  ulSearchBox: { flexDirection: 'row', alignItems: 'center', margin: 12, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: C.white, borderRadius: 14, borderWidth: 1, borderColor: C.border, gap: 8 },
-  ulSearchIcon:  { fontSize: 15 },
-  ulSearchInput: { flex: 1, fontSize: 14, color: C.greyDark, padding: 0 },
-  ulClear:       { fontSize: 14, color: C.grey, fontWeight: '700', paddingHorizontal: 4 },
-  ulLoader:   { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  ulList:     { paddingHorizontal: 12, paddingBottom: 40, gap: 10 },
-  ulEmpty:    { alignItems: 'center', paddingTop: 60, gap: 10 },
-  ulEmptyIcon:{ fontSize: 48 },
-  ulEmptyText:{ fontSize: 15, color: C.grey, fontWeight: '600' },
-  ulCard:     { flexDirection: 'row', alignItems: 'center', backgroundColor: C.white, borderRadius: 14, padding: 12, gap: 12, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
-  ulAvatar:   { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
-  ulAvatarText: { fontSize: 18, fontWeight: '800' },
-  ulInfo:     { flex: 1, gap: 3 },
-  ulName:     { fontSize: 14, fontWeight: '700', color: C.greyDark },
-  ulEmail:    { fontSize: 11, color: C.grey },
-  ulBadge:    { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20 },
-  ulBadgeDot: { width: 6, height: 6, borderRadius: 3 },
-  ulBadgeText:{ fontSize: 11, fontWeight: '700' },
-  ulActions:  { gap: 6 },
-  ulActionBtn:{ width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5 },
-
-  // ── UserPostsView ──────────────────────────────────────────────────────────
-  upSubtitle:  { fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 1 },
-  upList:      { paddingHorizontal: 12, paddingVertical: 12, gap: 10 },
-  upCard:      { flexDirection: 'row', backgroundColor: C.white, borderRadius: 14, padding: 14, gap: 12, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
-  upCardLeft:  { flex: 1, gap: 6 },
-  upCardRight: { alignItems: 'flex-end', gap: 6, minWidth: 52 },
-  upModeBadge: { alignSelf: 'flex-start', borderRadius: 20, borderWidth: 1.5, paddingHorizontal: 8, paddingVertical: 3 },
-  upModeText:  { fontSize: 11, fontWeight: '800' },
-  upDesc:      { fontSize: 13, color: C.greyDark, fontWeight: '500', lineHeight: 18 },
-  upLoc:       { fontSize: 11, color: C.grey },
-  upDate:      { fontSize: 11, color: C.grey, fontWeight: '600' },
-  upLikes:     { fontSize: 12, color: C.grey },
-  upViews:     { fontSize: 12, color: C.grey },
-  tableCard: {
-    backgroundColor: C.white, borderRadius: 14, overflow: 'hidden',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06, shadowRadius: 6, elevation: 2,
-  },
-  userRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12, gap: 10 },
-  rowDivider:     { height: 1, backgroundColor: C.border, marginHorizontal: 14 },
-  userAvatar:     { width: 40, height: 40, borderRadius: 20, backgroundColor: C.blueLight, justifyContent: 'center', alignItems: 'center' },
-  userAvatarText: { fontSize: 16, fontWeight: '800', color: C.blue },
-  userInfo:       { flex: 1 },
-  userName:       { fontSize: 14, fontWeight: '700', color: C.greyDark },
-  userEmail:      { fontSize: 11, color: C.grey, marginTop: 1 },
-  userMeta:       { alignItems: 'flex-end', gap: 4 },
-  statusBadge:    { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20 },
-  statusText:     { fontSize: 11, fontWeight: '700' },
-  userDate:       { fontSize: 10, color: '#B0B3C6' },
-  emptyTable:     { textAlign: 'center', padding: 20, color: C.grey, fontSize: 13 },
-  // ── Zones ─────────────────────────────────────────────────────────────────
-  zoneQuickCard: {
+  // Quick action cards (identiques aux LocalScreen zone cards)
+  quickCard: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
-    backgroundColor: C.white, borderRadius: 16, padding: 16,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06, shadowRadius: 6, elevation: 2,
+    backgroundColor: C.white,
+    borderRadius: 20, borderWidth: 1, borderColor: C.borderLight,
+    padding: 16, marginBottom: 12,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.07, shadowRadius: 16, elevation: 4,
   },
-  zoneQuickIcon: {
-    width: 52, height: 52, borderRadius: 14,
-    backgroundColor: C.blueLight,
-    justifyContent: 'center', alignItems: 'center',
-  },
-  zoneQuickTitle: { fontSize: 15, fontWeight: '800', color: C.greyDark },
-  zoneQuickSub:   { fontSize: 12, color: C.grey, marginTop: 2 },
-  zoneQuickArrow: { fontSize: 18, color: C.blue, fontWeight: '700' },
+  quickCardIcon:  { width: 52, height: 52, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
+  quickCardTitle: { fontSize: 15, fontWeight: '800', color: C.text },
+  quickCardSub:   { fontSize: 12, color: C.textDim, marginTop: 2 },
 
-  zoneActionsRow: {
-    flexDirection: 'row', gap: 8, margin: 12,
+  // Search box (comme LocalScreen)
+  searchBox: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: C.white, borderWidth: 1, borderColor: C.border,
+    borderRadius: 22, paddingHorizontal: 14, paddingVertical: 10,
+    margin: 12,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04, shadowRadius: 4, elevation: 2,
   },
-  zoneActionBtn: {
+  searchInput: { flex: 1, fontSize: 14, color: C.text, padding: 0 },
+
+  // Zone actions row
+  actionsRow: { flexDirection: 'row', gap: 10, paddingHorizontal: 14, paddingVertical: 12 },
+  actionChip: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 5, paddingVertical: 13, borderRadius: 14,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.18, shadowRadius: 6, elevation: 3,
+    gap: 6, paddingVertical: 10, borderRadius: 14, borderWidth: 1.5,
   },
-  zoneActionIcon: { fontSize: 15, color: C.white, fontWeight: '900' },
-  zoneActionText: { fontSize: 13, fontWeight: '800', color: C.white },
+  actionChipText: { fontSize: 12, fontWeight: '700' },
 
+  // Zone card (même style que LocalScreen PubCard)
   zoneCard: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: C.white, borderRadius: 14, padding: 14,
-    shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 }, elevation: 2,
+    backgroundColor: C.white,
+    borderRadius: 20, borderWidth: 1, borderColor: C.borderLight,
+    padding: 14, marginBottom: 12,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.07, shadowRadius: 16, elevation: 4,
   },
-  zoneCardIconBox: {
-    width: 44, height: 44, borderRadius: 22,
-    backgroundColor: C.blueLight,
-    justifyContent: 'center', alignItems: 'center',
-  },
-  zoneCardInfo:     { flex: 1, gap: 2 },
-  zoneCardName:     { fontSize: 14, fontWeight: '800', color: C.greyDark },
-  zoneCardPays:     { fontSize: 11, fontWeight: '700', color: C.blue, marginBottom: 1 },
-  zoneCardLocation: { fontSize: 12, color: C.grey },
-  zoneCardCoords:   { fontSize: 11, color: '#B0B3C6', fontWeight: '600' },
-  zoneDeleteBtn: {
-    width: 36, height: 36, borderRadius: 10,
-    backgroundColor: C.red + '15', borderWidth: 1.5, borderColor: C.red,
-    justifyContent: 'center', alignItems: 'center',
-  },
+  zoneIconBox: { width: 46, height: 46, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
+  zoneInfo:    { flex: 1, gap: 2 },
+  zoneName:    { fontSize: 14, fontWeight: '800', color: C.text },
+  zonePays:    { fontSize: 11, fontWeight: '700', color: C.blue },
+  zoneLoc:     { fontSize: 12, color: C.textDim },
+  zoneCoords:  { fontSize: 11, color: C.textFaint, fontWeight: '500' },
+  deleteBtn:   { width: 36, height: 36, borderRadius: 12, backgroundColor: C.redGlow, borderWidth: 1.5, borderColor: C.red, justifyContent: 'center', alignItems: 'center' },
 
-  actionsGrid:    { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  actionBtn: {
-    width: (width - 44) / 2, backgroundColor: C.white, borderRadius: 14,
-    padding: 16, alignItems: 'center', gap: 8,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06, shadowRadius: 6, elevation: 2,
+  // User card
+  userCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: C.white,
+    borderRadius: 20, borderWidth: 1, borderColor: C.borderLight,
+    padding: 14, marginBottom: 12,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.07, shadowRadius: 16, elevation: 4,
   },
-  actionIcon:  { fontSize: 26 },
-  actionLabel: { fontSize: 13, fontWeight: '700', textAlign: 'center' },
+  userAvatar:     { width: 46, height: 46, borderRadius: 23, justifyContent: 'center', alignItems: 'center' },
+  userAvatarText: { color: '#FFFFFF', fontWeight: '800', fontSize: 18 },
+  userInfo:       { flex: 1, gap: 3 },
+  userName:       { fontSize: 14, fontWeight: '700', color: C.text },
+  userEmail:      { fontSize: 11, color: C.textFaint },
+  userBadge:      { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20 },
+  userBadgeDot:   { width: 6, height: 6, borderRadius: 3 },
+  userBadgeText:  { fontSize: 11, fontWeight: '700' },
+  userActions:    { gap: 6 },
+  actionIconBtn:  { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5 },
+
+  // Post card
+  postCard: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 12,
+    backgroundColor: C.white,
+    borderRadius: 20, borderWidth: 1, borderColor: C.borderLight,
+    padding: 14, marginBottom: 12, overflow: 'hidden',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.07, shadowRadius: 16, elevation: 4,
+  },
+  postAccentBar:  { position: 'absolute', left: 0, top: 0, bottom: 0, width: 4 },
+  postModeBadge:  { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', borderRadius: 20, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 3, marginBottom: 6, marginLeft: 10 },
+  postModeDot:    { width: 6, height: 6, borderRadius: 3 },
+  postModeText:   { fontSize: 10, fontWeight: '800' },
+  postDesc:       { fontSize: 13, color: C.textDim, lineHeight: 18, marginLeft: 10 },
+  postLoc:        { fontSize: 11, color: C.textFaint, marginLeft: 10 },
+  postMeta:       { alignItems: 'flex-end', gap: 5, minWidth: 52 },
+  postDate:       { fontSize: 11, color: C.textFaint, fontWeight: '600' },
+  postStat:       { fontSize: 12, color: C.textDim },
+
+  // Loader / Empty
+  loaderBox: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 60 },
+  emptyBox:  { alignItems: 'center', paddingTop: 60, gap: 12 },
+  emptyTitle:{ fontSize: 16, fontWeight: '700', color: C.textDim },
+  listPad:   { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 120 },
 });
 
-// ─── Styles Modal ─────────────────────────────────────────────────────────────
-const modal = StyleSheet.create({
-  overlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.55)',
-    justifyContent: 'flex-end', alignItems: 'center',
-  },
+// ── Styles modaux ─────────────────────────────────────────────────────────────
+const m = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end', alignItems: 'center' },
   sheet: {
     width: '100%', maxHeight: height * 0.88,
-    backgroundColor: C.white,
-    borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    paddingHorizontal: 20, paddingTop: 20, paddingBottom: 30,
+    backgroundColor: C.white, borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    paddingHorizontal: 20, paddingTop: 12, paddingBottom: 30,
   },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
-  title:    { fontSize: 18, fontWeight: '800', color: C.greyDark },
-  closeBtn: { padding: 6, backgroundColor: C.greyLight, borderRadius: 20 },
-  closeX:   { fontSize: 14, color: C.grey, fontWeight: '700' },
-  label:    { fontSize: 13, fontWeight: '700', color: C.grey, marginBottom: 6 },
-  required: { color: C.red },
-  input: {
-    backgroundColor: C.greyLight, borderRadius: 12, borderWidth: 1.5,
-    borderColor: C.border, paddingHorizontal: 14, paddingVertical: 12,
-    fontSize: 14, color: C.greyDark, marginBottom: 14,
-  },
-  textArea: { minHeight: 80, textAlignVertical: 'top' },
+  sheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: C.border, alignSelf: 'center', marginBottom: 14 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20 },
+  headerIcon: { width: 38, height: 38, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  title:    { flex: 1, fontSize: 17, fontWeight: '800', color: C.text },
+  closeBtn: { width: 32, height: 32, borderRadius: 10, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
+  label:         { fontSize: 13, fontWeight: '700', color: C.textDim, marginBottom: 6, marginTop: 12 },
+  req:           { color: C.red },
+  labelOptional: { fontSize: 11, fontWeight: '400', color: C.textFaint },
   catChip: {
-    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
-    backgroundColor: C.greyLight, borderWidth: 1.5, borderColor: C.border,
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20,
+    backgroundColor: '#F3F4F6', borderWidth: 1.5, borderColor: C.border,
   },
-  catChipActive: { backgroundColor: C.blueLight, borderColor: C.blue },
-  catText:       { fontSize: 13, color: C.grey, fontWeight: '600' },
-  catTextActive: { color: C.blue },
-
-  // Bouton choisir sur la carte
-  mapPickBtn: {
+  catChipActive:     { backgroundColor: C.greenGlow, borderColor: C.green },
+  catChipText:       { fontSize: 12, color: C.textDim, fontWeight: '600' },
+  catChipTextActive: { color: C.green, fontWeight: '700' },
+  input: {
+    backgroundColor: C.inputBg, borderRadius: 14, borderWidth: 1.5,
+    borderColor: C.border, paddingHorizontal: 14, paddingVertical: 12,
+    fontSize: 14, color: C.text, marginBottom: 2,
+  },
+  inputFilled: { borderColor: C.green, backgroundColor: C.greenGlow },
+  textArea:    { minHeight: 80, textAlignVertical: 'top' },
+  select: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: C.inputBg, borderRadius: 14, borderWidth: 1.5,
+    borderColor: C.border, paddingHorizontal: 14, paddingVertical: 14,
+  },
+  selectFilled:      { borderColor: C.green, backgroundColor: C.greenGlow },
+  selectDisabled:    { opacity: 0.4 },
+  selectText:        { fontSize: 14, color: C.text, fontWeight: '600', flex: 1 },
+  selectPlaceholder: { color: C.textFaint, fontWeight: '400' },
+  chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: '#F3F4F6', borderWidth: 1.5, borderColor: C.border },
+  chipActive:     { backgroundColor: C.greenGlow, borderColor: C.green },
+  chipText:       { fontSize: 13, color: C.textDim, fontWeight: '600' },
+  chipTextActive: { color: C.green },
+  mapBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: C.blueLight, borderRadius: 12,
+    backgroundColor: C.blueGlow, borderRadius: 14,
     borderWidth: 1.5, borderColor: C.blue,
-    paddingHorizontal: 16, paddingVertical: 14,
-    marginBottom: 12,
+    paddingHorizontal: 16, paddingVertical: 14, marginTop: 8, marginBottom: 4,
   },
-  mapPickIcon: { fontSize: 20 },
-  mapPickText: { fontSize: 14, color: C.blue, fontWeight: '700', flex: 1 },
-
-  // Résultat coordonnées
-  coordsResult: {
+  mapBtnText: { fontSize: 14, color: C.blue, fontWeight: '700', flex: 1 },
+  coordsBox: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: '#E8FAF0', borderRadius: 12,
-    borderWidth: 1.5, borderColor: C.green,
-    paddingHorizontal: 14, paddingVertical: 12,
-    marginBottom: 14,
+    backgroundColor: C.greenGlow, borderRadius: 14,
+    borderWidth: 1.5, borderColor: 'rgba(45,189,126,0.3)',
+    paddingHorizontal: 14, paddingVertical: 12, marginTop: 6, marginBottom: 8,
   },
-  coordsResultIcon:  { fontSize: 18 },
-  coordsResultLabel: { fontSize: 12, color: C.grey, fontWeight: '600' },
-  coordsResultVal:   { fontSize: 13, color: C.greyDark, fontWeight: '700', marginTop: 2 },
-  coordsClear:       { fontSize: 16, color: C.grey, marginLeft: 'auto' },
+  coordsLabel: { fontSize: 11, color: C.textDim, fontWeight: '600' },
+  coordsVal:   { fontSize: 13, color: C.text, fontWeight: '700', marginTop: 1 },
+  btnRow:     { flexDirection: 'row', gap: 12, marginTop: 16 },
+  cancelBtn:  { flex: 1, paddingVertical: 14, borderRadius: 16, alignItems: 'center', backgroundColor: '#F3F4F6', borderWidth: 1.5, borderColor: C.border },
+  cancelText: { fontSize: 15, fontWeight: '700', color: C.textDim },
+  confirmBtn: { flex: 2, borderRadius: 16, overflow: 'hidden' },
+  confirmGrad:{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', paddingVertical: 14 },
+  confirmText:{ fontSize: 15, fontWeight: '800', color: '#FFFFFF' },
+});
 
-  btnRow:     { flexDirection: 'row', gap: 12, marginTop: 8 },
-  cancelBtn: {
-    flex: 1, paddingVertical: 14, borderRadius: 14, alignItems: 'center',
-    backgroundColor: C.greyLight, borderWidth: 1.5, borderColor: C.border,
-  },
-  cancelText:  { fontSize: 15, fontWeight: '700', color: C.grey },
-  confirmBtn: {
-    flex: 2, paddingVertical: 14, borderRadius: 14, alignItems: 'center',
-    backgroundColor: C.blue,
-    shadowColor: C.blue, shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35, shadowRadius: 8, elevation: 4,
-  },
-  confirmText: { fontSize: 15, fontWeight: '800', color: C.white, letterSpacing: 0.5 },
+// ── Styles pickers ────────────────────────────────────────────────────────────
+const pick = StyleSheet.create({
+  overlay:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  sheet:      { backgroundColor: C.white, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingTop: 12, maxHeight: height * 0.75 },
+  header:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: C.borderLight },
+  title:      { fontSize: 16, fontWeight: '800', color: C.text },
+  searchBox:  { flexDirection: 'row', alignItems: 'center', gap: 8, margin: 12, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: C.inputBg, borderRadius: 14, borderWidth: 1.5, borderColor: C.border },
+  searchInput:{ flex: 1, fontSize: 14, color: C.text, padding: 0 },
+  empty:      { textAlign: 'center', paddingVertical: 24, color: C.textFaint, fontSize: 14 },
+  item:       { paddingHorizontal: 20, paddingVertical: 14 },
+  itemBorder: { borderBottomWidth: 1, borderBottomColor: C.borderLight },
+  itemLabel:  { fontSize: 15, fontWeight: '600', color: C.text },
+  itemSub:    { fontSize: 12, color: C.textFaint, marginTop: 2 },
 });

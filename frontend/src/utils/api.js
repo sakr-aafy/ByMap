@@ -68,32 +68,7 @@ export async function register({ nom, prenom, email, phone, password }) {
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.message || 'Erreur inscription');
-  // Pas de session ici — l'utilisateur doit d'abord vérifier son email
-  return data; // { message, emailVerificationRequired, user }
-}
-
-// ─── POST /api/auth/verify-email ─────────────────────────────────────────────
-export async function verifyEmail({ email, code }) {
-  const res  = await fetch(`${API_URL}/auth/verify-email`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ email, code }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.message || 'Code invalide');
   await saveSession(data.accessToken, data.refreshToken, data.user);
-  return data;
-}
-
-// ─── POST /api/auth/resend-verification ──────────────────────────────────────
-export async function resendVerification({ email }) {
-  const res  = await fetch(`${API_URL}/auth/resend-verification`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ email }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.message || 'Erreur renvoi');
   return data;
 }
 
@@ -105,29 +80,12 @@ export async function login({ email, phone, password }) {
     body:    JSON.stringify({ email, phone, password }),
   });
   const data = await res.json();
-
-  // Cas spécial : email non vérifié
-  if (res.status === 403 && data.emailVerificationRequired) {
-    const err = new Error(data.message);
-    err.emailVerificationRequired = true;
-    err.email = data.email || email;
-    throw err;
-  }
-
-  // OTP de connexion requis (credentials corrects, email envoyé)
-  if (res.ok && data.loginOtpRequired) {
-    const err = new Error(data.message);
-    err.loginOtpRequired = true;
-    err.email = data.email;
-    throw err;
-  }
-
   if (!res.ok) throw new Error(data.message || 'Erreur connexion');
   await saveSession(data.accessToken, data.refreshToken, data.user);
   return data;
 }
 
-// ─── POST /api/auth/verify-login-otp ─────────────────────────────────────────
+// ─── POST /api/auth/verify-login-otp (désactivé) ─────────────────────────────
 export async function verifyLoginOtp({ email, code }) {
   const res  = await fetch(`${API_URL}/auth/verify-login-otp`, {
     method:  'POST',

@@ -11,6 +11,9 @@ import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { File, Paths } from 'expo-file-system';
+import * as MediaLibrary from 'expo-media-library';
+import * as Sharing from 'expo-sharing';
 import { getCurrentUser } from '../utils/api';
 import { useTranslation } from 'react-i18next';
 import { environment } from '../environments/environment';
@@ -59,6 +62,30 @@ function VideoItem({ uri, shouldPlay, onPress }) {
   );
 }
 
+// ── Download image helper ─────────────────────────────────────────────────────
+async function downloadImage(uri) {
+  try {
+    const dest = new File(Paths.cache, `bymap_${Date.now()}.jpg`);
+    const file = await File.downloadFileAsync(uri, dest);
+
+    const { status } = await MediaLibrary.requestPermissionsAsync();
+    if (status === 'granted') {
+      await MediaLibrary.saveToLibraryAsync(file.uri);
+      Alert.alert('Téléchargé', 'Image enregistrée dans votre galerie.');
+    } else {
+      // Expo Go or permission denied — share instead so the user can save manually
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(file.uri, { mimeType: 'image/jpeg', dialogTitle: 'Enregistrer l\'image' });
+      } else {
+        Alert.alert('Permission refusée', "Autorisez l'accès à la galerie pour télécharger.");
+      }
+    }
+  } catch {
+    Alert.alert('Erreur', "Impossible de télécharger l'image.");
+  }
+}
+
 // ── Carousel ──────────────────────────────────────────────────────────────────
 function MediaCarousel({ medias }) {
   const [index,  setIndex]  = useState(0);
@@ -82,6 +109,13 @@ function MediaCarousel({ medias }) {
           return (
             <View style={styles.mediaSlide}>
               <Image source={{ uri }} style={styles.mediaImage} resizeMode="cover" />
+              <TouchableOpacity
+                style={styles.downloadBtn}
+                onPress={() => downloadImage(uri)}
+                activeOpacity={0.8}
+              >
+                <FontAwesome6 name="download" size={13} color="#FFFFFF" />
+              </TouchableOpacity>
             </View>
           );
         }}
@@ -535,4 +569,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15, shadowRadius: 12, elevation: 6,
   },
   contactText: { fontSize: 16, fontWeight: '800', color: '#FFFFFF' },
+
+  downloadBtn: {
+    position: 'absolute', bottom: 10, right: 10,
+    width: 34, height: 34, borderRadius: 17,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center', alignItems: 'center',
+  },
 });

@@ -78,7 +78,7 @@ exports.create = async (req, res) => {
 // Retourne les zones groupées avec comptages { zones: [{name, gouvernorat, local, duo}] }
 exports.getZoneDots = async (_req, res) => {
   try {
-    const pubs = await Publication.find({ statut: 'active' })
+    const pubs = await Publication.find({ statut: 'active', expiresAt: { $gt: new Date() } })
       .select('mode localisation localisationDebut localisationFin')
       .lean();
 
@@ -120,7 +120,14 @@ exports.getAll = async (req, res) => {
       auteur,
     } = req.query;
 
-    const filter = { statut: 'active' };
+    // Auto-archive posts whose time has expired
+    const now = new Date();
+    await Publication.updateMany(
+      { statut: 'active', expiresAt: { $lte: now } },
+      { $set: { statut: 'archivee' } }
+    );
+
+    const filter = { statut: 'active', expiresAt: { $gt: now } };
     if (mode)   filter.mode   = mode;
     if (auteur) filter.auteur = auteur;
     if (ville) {
@@ -158,7 +165,8 @@ exports.getOne = async (req, res) => {
     const pub = await Publication.findById(req.params.id)
       .populate('auteur', 'nom prenom avatarUrl');
 
-    if (!pub || pub.statut === 'supprimee')
+    const expired = pub?.expiresAt && pub.expiresAt < new Date();
+    if (!pub || pub.statut === 'supprimee' || pub.statut === 'archivee' || expired)
       return res.status(404).json({ message: 'Publication introuvable' });
 
     // Incrémenter les vues
