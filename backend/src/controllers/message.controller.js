@@ -1,5 +1,7 @@
 // src/controllers/message.controller.js
-const Message = require('../models/Message.model');
+const Message  = require('../models/Message.model');
+const User     = require('../models/User.model');
+const { sendPush } = require('../services/push.service');
 
 // GET /api/messages/:userId  — conversation entre l'utilisateur connecté et :userId
 exports.getConversation = async (req, res) => {
@@ -46,6 +48,17 @@ exports.sendMessage = async (req, res) => {
       { path: 'sender',   select: 'prenom nom avatarUrl' },
       { path: 'receiver', select: 'prenom nom avatarUrl' },
     ]);
+
+    // Notify receiver (fire-and-forget)
+    (async () => {
+      try {
+        const receiver = await User.findById(receiverId).select('pushToken prenom nom');
+        if (receiver?.pushToken) {
+          const senderName = `${populated.sender.prenom || ''} ${populated.sender.nom || ''}`.trim() || 'Quelqu\'un';
+          await sendPush(receiver.pushToken, `Message de ${senderName}`, content.trim().slice(0, 100), { screen: 'Messages', params: { userId: req.user.id } });
+        }
+      } catch {}
+    })();
 
     res.status(201).json(populated);
   } catch (err) {

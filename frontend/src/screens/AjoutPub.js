@@ -1,5 +1,5 @@
 // src/screens/AjoutPub.js
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { FontAwesome6 } from '@expo/vector-icons';
 import {
   StyleSheet, View, Text, TextInput, TouchableOpacity, ScrollView,
@@ -32,10 +32,21 @@ const C = {
 
 // ── Helpers tunisia.json ───────────────────────────────────────────────────────
 const GOUVERNORATS = Object.keys(TUNISIA).sort();
-function getDelegations(gov) { if (!gov || !TUNISIA[gov]) return []; return [...new Set(TUNISIA[gov].map(r => r.delegation))].sort(); }
+// Case-insensitive key lookup so typed values like "tunis" match "Tunis"
+function govKey(name) {
+  if (!name) return null;
+  const n = name.toLowerCase();
+  return Object.keys(TUNISIA).find(k => k.toLowerCase() === n) || null;
+}
+function getDelegations(gov) {
+  const key = govKey(gov);
+  if (!key) return [];
+  return [...new Set(TUNISIA[key].map(r => r.delegation))].sort();
+}
 function getLocalites(gov, deleg) {
-  if (!gov || !deleg || !TUNISIA[gov]) return [];
-  return TUNISIA[gov].filter(r => r.delegation === deleg).map(r => r.localite).filter(Boolean).sort();
+  const key = govKey(gov);
+  if (!key || !deleg) return [];
+  return TUNISIA[key].filter(r => r.delegation === deleg).map(r => r.localite).filter(Boolean).sort();
 }
 
 // ── MediaPicker ────────────────────────────────────────────────────────────────
@@ -115,6 +126,7 @@ function MediaPicker({ media, setMedia, accent }) {
   );
 }
 
+
 // ── Selector ───────────────────────────────────────────────────────────────────
 function Selector({ label, value, items, onSelect, placeholder, disabled, accent }) {
   const [open, setOpen] = useState(false);
@@ -169,14 +181,68 @@ function Selector({ label, value, items, onSelect, placeholder, disabled, accent
   );
 }
 
+// Shared zone cache so all LocalisationBlock instances share one fetch
+let _zonesCache = null;
+async function fetchZones() {
+  if (_zonesCache) return _zonesCache;
+  try {
+    const res  = await fetch(`${API_URL}/zones`);
+    const data = await res.json();
+    _zonesCache = Array.isArray(data) ? data : (data.zones || []);
+  } catch { _zonesCache = []; }
+  return _zonesCache;
+}
+
 // ── LocalisationBlock ──────────────────────────────────────────────────────────
 function LocalisationBlock({ prefix, showDeleg, mode, loc, setLoc }) {
-  const delegations = useMemo(() => getDelegations(loc.ville), [loc.ville]);
-  const localites   = useMemo(() => getLocalites(loc.ville, loc.gouvernorat), [loc.ville, loc.gouvernorat]);
+  const accent    = mode === 'duo' ? C.blue : C.green;
+  const [zones, setZones] = useState(_zonesCache || []);
+
+  useEffect(() => {
+    if (!_zonesCache) fetchZones().then(setZones);
+  }, []);
+
+  // Zones whose gouvernorat matches the selected ville → appear in Gouvernorat dropdown
+  const zonesForVille = useMemo(
+    () => zones.filter(z => z.gouvernorat && norm(z.gouvernorat) === norm(loc.ville)),
+    [zones, loc.ville]
+  );
+
+  // Extra villes from zones whose gouvernorat is not already in Tunisia JSON
+  const extraVilles = useMemo(() => {
+    const known = new Set(GOUVERNORATS.map(g => norm(g)));
+    return [...new Set(
+      zones.map(z => z.gouvernorat).filter(g => g && !known.has(norm(g)))
+    )];
+  }, [zones]);
+
+  const allVilles       = useMemo(() => [...GOUVERNORATS, ...extraVilles], [extraVilles]);
+  const standardDelegs  = useMemo(() => getDelegations(loc.ville), [loc.ville]);
+  const zoneGouvernorats = useMemo(() => zonesForVille.map(z => z.name), [zonesForVille]);
+  const allGouvernorats  = useMemo(
+    () => [...new Set([...standardDelegs, ...zoneGouvernorats])],
+    [standardDelegs, zoneGouvernorats]
+  );
+  const localites = useMemo(() => getLocalites(loc.ville, loc.gouvernorat), [loc.ville, loc.gouvernorat]);
+
   const handleVille = (v) => setLoc({ ville: v, gouvernorat: '', delegation: '' });
-  const handleGov   = (g) => setLoc(prev => ({ ...prev, gouvernorat: g, delegation: '' }));
+
+  const handleGov = (g) => {
+    // If the selected value is a zone name, store zone name as delegation too (for zone-dots)
+    const matchedZone = zonesForVille.find(z => z.name === g);
+    setLoc(prev => ({
+      ...prev,
+      gouvernorat: g,
+      delegation:  matchedZone ? matchedZone.name : '',
+    }));
+  };
+
   const handleDeleg = (d) => setLoc(prev => ({ ...prev, delegation: d }));
-  const accent = mode === 'duo' ? C.blue : C.green;
+
+  // Does the currently selected gouvernorat come from a zone?
+  const activeZone = loc.gouvernorat
+    ? zonesForVille.find(z => z.name === loc.gouvernorat) || null
+    : null;
 
   return (
     <View style={styles.locBlock}>
@@ -186,21 +252,47 @@ function LocalisationBlock({ prefix, showDeleg, mode, loc, setLoc }) {
           <Text style={[styles.locPrefixText, { color: accent }]}>{prefix}</Text>
         </View>
       )}
+
+      {/* ── Ville ── */}
       <View style={styles.locRow}>
         <View style={styles.locLabelRow}>
           <FontAwesome6 name="city" size={12} color={C.textDim} />
           <Text style={styles.locLabel}>Ville</Text>
         </View>
-        <Selector label="Choisir une ville" value={loc.ville} items={GOUVERNORATS} onSelect={handleVille} placeholder="Sélectionner..." accent={accent} />
+        <Selector label="Choisir une ville" value={loc.ville} items={allVilles} onSelect={handleVille} placeholder="Sélectionner..." accent={accent} />
       </View>
+
+      {/* ── Gouvernorat (delegations + zones de cette ville) ── */}
       <View style={[styles.locRow, !loc.ville && styles.locRowDisabled]}>
         <View style={styles.locLabelRow}>
           <FontAwesome6 name="map" size={12} color={!loc.ville ? C.textFaint : C.textDim} />
           <Text style={[styles.locLabel, !loc.ville && styles.locLabelDisabled]}>Gouvernorat</Text>
+          {zoneGouvernorats.length > 0 && loc.ville && (
+            <View style={[styles.zoneCountBadge, { backgroundColor: accent === C.green ? C.greenGlow : C.blueGlow }]}>
+              <FontAwesome6 name="location-dot" size={9} color={accent} />
+              <Text style={[styles.zoneCountText, { color: accent }]}>{zoneGouvernorats.length} zone{zoneGouvernorats.length > 1 ? 's' : ''}</Text>
+            </View>
+          )}
         </View>
-        <Selector label="Choisir un gouvernorat" value={loc.gouvernorat} items={delegations} onSelect={handleGov} placeholder={loc.ville ? 'Sélectionner...' : "Choisir une ville d'abord"} disabled={!loc.ville} accent={accent} />
+        <Selector
+          label="Choisir un gouvernorat / zone"
+          value={loc.gouvernorat}
+          items={allGouvernorats}
+          onSelect={handleGov}
+          placeholder={loc.ville ? 'Sélectionner...' : "Choisir une ville d'abord"}
+          disabled={!loc.ville}
+          accent={accent}
+        />
+        {activeZone && (
+          <View style={[styles.zoneActiveBadge, { borderColor: accent, backgroundColor: accent === C.green ? C.greenGlow : C.blueGlow }]}>
+            <FontAwesome6 name="circle-check" size={11} color={accent} />
+            <Text style={[styles.zoneActiveText, { color: accent }]}>Zone : {activeZone.name}</Text>
+          </View>
+        )}
       </View>
-      {showDeleg && (
+
+      {/* ── Délégation (mode local, visible seulement si gouvernorat standard) ── */}
+      {showDeleg && !activeZone && (
         <View style={[styles.locRow, !loc.gouvernorat && styles.locRowDisabled]}>
           <View style={styles.locLabelRow}>
             <FontAwesome6 name="location-pin" size={12} color={!loc.gouvernorat ? C.textFaint : C.textDim} />
@@ -229,34 +321,65 @@ const Field = ({ label, iconName, accent, children }) => (
 
 const emptyLoc = () => ({ ville: '', gouvernorat: '', delegation: '' });
 
+// ── Zone locked badge ─────────────────────────────────────────────────────────
+function ZoneBadge({ loc, accent, label }) {
+  const locLabel = [loc.ville, loc.gouvernorat, loc.delegation].filter(Boolean).join(' › ');
+  return (
+    <View style={styles.zoneBadge}>
+      <View style={[styles.zoneBadgeIcon, { backgroundColor: accent === C.green ? C.greenGlow : C.blueGlow }]}>
+        <FontAwesome6 name="location-dot" size={14} color={accent} />
+      </View>
+      <View style={{ flex: 1 }}>
+        {label ? <Text style={styles.zoneBadgeLabel}>{label}</Text> : null}
+        <Text style={[styles.zoneBadgeName, { color: accent }]} numberOfLines={1}>{locLabel}</Text>
+        <Text style={styles.zoneBadgeSub}>Zone sélectionnée automatiquement</Text>
+      </View>
+      <FontAwesome6 name="lock" size={12} color={C.textFaint} />
+    </View>
+  );
+}
+
+// Remove accents for loose matching (é→e, à→a, etc.)
+function norm(str) {
+  return (str || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+}
+
 // Résout un nom de zone (gouvernorat / délégation / localité) → { ville, gouvernorat, delegation }
 function resolveZone(zoneName) {
   if (!zoneName) return emptyLoc();
-  const z = zoneName.trim();
-  const zL = z.toLowerCase();
+  const zN = norm(zoneName);
+  if (!zN) return emptyLoc();
 
-  // 1. Correspondance exacte sur un gouvernorat
-  const exactGov = Object.keys(TUNISIA).find(k => k.toLowerCase() === zL);
+  // 1. Exact gouvernorat (accent-insensitive)
+  const exactGov = Object.keys(TUNISIA).find(k => norm(k) === zN);
   if (exactGov) return { ville: exactGov, gouvernorat: '', delegation: '' };
 
-  // 2. Correspondance sur une délégation
+  // 2. Exact delegation name (accent-insensitive)
   for (const [gov, places] of Object.entries(TUNISIA)) {
     const delegs = [...new Set(places.map(p => p.delegation).filter(Boolean))];
-    const d = delegs.find(d => d.toLowerCase() === zL);
+    const d = delegs.find(d => norm(d) === zN);
     if (d) return { ville: gov, gouvernorat: d, delegation: '' };
   }
 
-  // 3. Correspondance sur une localité
+  // 3. Exact localité (accent-insensitive)
   for (const [gov, places] of Object.entries(TUNISIA)) {
-    const p = places.find(p => p.localite?.toLowerCase() === zL);
+    const p = places.find(p => norm(p.localite) === zN);
     if (p) return { ville: gov, gouvernorat: p.delegation || '', delegation: p.localite || '' };
   }
 
-  // 4. Correspondance partielle sur gouvernorat
-  const partialGov = Object.keys(TUNISIA).find(k =>
-    k.toLowerCase().includes(zL) || zL.includes(k.toLowerCase())
-  );
+  // 4. Partial gouvernorat match
+  const partialGov = Object.keys(TUNISIA).find(k => {
+    const kN = norm(k);
+    return kN.includes(zN) || zN.includes(kN);
+  });
   if (partialGov) return { ville: partialGov, gouvernorat: '', delegation: '' };
+
+  // 5. Partial delegation match
+  for (const [gov, places] of Object.entries(TUNISIA)) {
+    const delegs = [...new Set(places.map(p => p.delegation).filter(Boolean))];
+    const d = delegs.find(d => { const dN = norm(d); return dN.includes(zN) || zN.includes(dN); });
+    if (d) return { ville: gov, gouvernorat: d, delegation: '' };
+  }
 
   return emptyLoc();
 }
@@ -282,6 +405,21 @@ export default function AjoutePub() {
   const [locDebut, setLocDebut] = useState(initialLoc);
   const [locFin,   setLocFin]   = useState(emptyLoc());
 
+  // true when the user arrived from a zone click — localisation is locked
+  const zoneLocked = !!route.params?.zoneName && (initialLoc.ville !== '' || initialLoc.gouvernorat !== '');
+
+  // Sync state if screen is already mounted and params change (stack reuse)
+  const prevZoneName = useRef(route.params?.zoneName);
+  useEffect(() => {
+    const z = route.params?.zoneName;
+    if (z !== prevZoneName.current) {
+      prevZoneName.current = z;
+      const newLoc = resolveZone(z);
+      setLoc(newLoc);
+      setLocDebut(newLoc);
+    }
+  }, [route.params?.zoneName]);
+
   const accent    = mode === 'duo' ? C.blue : C.green;
   const accentGlow = mode === 'duo' ? C.blueGlow : C.greenGlow;
 
@@ -299,8 +437,8 @@ export default function AjoutePub() {
       formData.append('description', desc.trim());
       if (mode === 'local') { formData.append('ville', loc.ville); formData.append('gouvernorat', loc.gouvernorat); formData.append('delegation', loc.delegation); }
       else {
-        formData.append('debut_ville', locDebut.ville); formData.append('debut_gouvernorat', locDebut.gouvernorat);
-        formData.append('fin_ville', locFin.ville); formData.append('fin_gouvernorat', locFin.gouvernorat);
+        formData.append('debut_ville', locDebut.ville); formData.append('debut_gouvernorat', locDebut.gouvernorat); formData.append('debut_delegation', locDebut.delegation);
+        formData.append('fin_ville', locFin.ville); formData.append('fin_gouvernorat', locFin.gouvernorat); formData.append('fin_delegation', locFin.delegation);
       }
       media.forEach((item, index) => {
         const ext = item.uri.split('.').pop() || 'jpg';
@@ -372,13 +510,22 @@ export default function AjoutePub() {
             </Field>
 
             {mode === 'local' ? (
-              <Field label="Localisation" iconName="location-dot" accent={accent}>
-                <LocalisationBlock showDeleg={true} mode="local" loc={loc} setLoc={setLoc} />
-              </Field>
+              zoneLocked ? (
+                <Field label="Localisation" iconName="location-dot" accent={accent}>
+                  <ZoneBadge loc={loc} accent={accent} />
+                </Field>
+              ) : (
+                <Field label="Localisation" iconName="location-dot" accent={accent}>
+                  <LocalisationBlock showDeleg={true} mode="local" loc={loc} setLoc={setLoc} />
+                </Field>
+              )
             ) : (
               <>
                 <Field label="Localisation Début" iconName="rocket" accent={accent}>
-                  <LocalisationBlock prefix="Début" showDeleg={false} mode="duo" loc={locDebut} setLoc={setLocDebut} />
+                  {zoneLocked
+                    ? <ZoneBadge loc={locDebut} accent={accent} label="Départ" />
+                    : <LocalisationBlock prefix="Début" showDeleg={false} mode="duo" loc={locDebut} setLoc={setLocDebut} />
+                  }
                 </Field>
                 <Field label="Localisation Fin" iconName="flag-checkered" accent={accent}>
                   <LocalisationBlock prefix="Fin" showDeleg={false} mode="duo" loc={locFin} setLoc={setLocFin} />
@@ -521,6 +668,22 @@ const styles = StyleSheet.create({
   locLabelDisabled: { color: '#9CA3AF' },
   locOptional:      { fontSize: 11, color: '#9CA3AF', fontStyle: 'italic' },
 
+  // ── Zone count badge (next to Gouvernorat label)
+  zoneCountBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    borderRadius: 20, paddingHorizontal: 8, paddingVertical: 3,
+  },
+  zoneCountText: { fontSize: 10, fontWeight: '700' },
+
+  // ── Zone active badge (shown below Gouvernorat selector when a zone is picked)
+  zoneActiveBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    borderWidth: 1, borderRadius: 10,
+    paddingHorizontal: 10, paddingVertical: 6,
+    marginTop: 2,
+  },
+  zoneActiveText: { fontSize: 12, fontWeight: '700' },
+
   // ── Selector
   selector: {
     flexDirection: 'row', alignItems: 'center',
@@ -549,6 +712,18 @@ const styles = StyleSheet.create({
   modalItem:    { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
   modalItemText:{ flex: 1, fontSize: 14, color: '#1A1A2E' },
   modalEmpty:   { textAlign: 'center', color: '#9CA3AF', paddingVertical: 24, fontSize: 14 },
+
+  // ── Zone locked badge
+  zoneBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: '#F8FAFB', borderRadius: 12,
+    borderWidth: 1.5, borderColor: '#E5E7EB',
+    paddingHorizontal: 14, paddingVertical: 13,
+  },
+  zoneBadgeIcon:  { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  zoneBadgeLabel: { fontSize: 10, fontWeight: '700', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 1 },
+  zoneBadgeName:  { fontSize: 14, fontWeight: '700' },
+  zoneBadgeSub:   { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
 
   // ── Submit
   submitBtn: {

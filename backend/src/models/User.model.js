@@ -72,6 +72,9 @@ const UserSchema = new mongoose.Schema(
     isDeleted:     { type: Boolean, default: false },              // soft-delete
     deletedAt:     { type: Date,    default: null  },
 
+    // ── Push notifications ────────────────────────────────────────────────────
+    pushToken: { type: String, default: '' },
+
     // ── Système de points ─────────────────────────────────────────────────────
     pointsSolde: { type: Number, default: 100, min: 0 },
 

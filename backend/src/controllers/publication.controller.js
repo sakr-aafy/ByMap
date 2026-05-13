@@ -1,7 +1,9 @@
 // src/controllers/publication.controller.js
 const Publication              = require('../models/Publication.model');
 const User                     = require('../models/User.model');
+const Favorite                 = require('../models/Favorite.model');
 const { uploadToCloud, deleteFromCloud } = require('../middleware/upload.middleware');
+const { sendPush }             = require('../services/push.service');
 
 // ─── Helper : construire l'objet localisation depuis req.body ─────────────────
 const parseLocalisation = (body, prefix = '') => ({
@@ -67,6 +69,33 @@ exports.create = async (req, res) => {
     const pub = await Publication.create(pubData);
     await pub.populate('auteur', 'nom prenom avatarUrl');
 
+    // ── Notify users who favorited this zone (fire-and-forget) ───────────────
+    (async () => {
+      try {
+        const zoneNames = new Set();
+        if (mode === 'local') {
+          const n = pubData.localisation?.delegation || pubData.localisation?.gouvernorat || pubData.localisation?.ville;
+          if (n) zoneNames.add(n);
+        } else {
+          const nD = pubData.localisationDebut?.delegation || pubData.localisationDebut?.gouvernorat || pubData.localisationDebut?.ville;
+          const nF = pubData.localisationFin?.delegation   || pubData.localisationFin?.gouvernorat   || pubData.localisationFin?.ville;
+          if (nD) zoneNames.add(nD);
+          if (nF) zoneNames.add(nF);
+        }
+        if (!zoneNames.size) return;
+
+        const favs = await Favorite.find({ zoneName: { $in: [...zoneNames] }, user: { $ne: req.user.id } }).select('user');
+        const userIds = [...new Set(favs.map(f => String(f.user)))];
+        if (!userIds.length) return;
+
+        const users = await User.find({ _id: { $in: userIds }, pushToken: { $ne: '' } }).select('pushToken');
+        const tokens = users.map(u => u.pushToken).filter(Boolean);
+        const authorName = `${author.prenom || ''} ${author.nom || ''}`.trim() || 'Quelqu\'un';
+        const zoneName   = [...zoneNames][0];
+        await sendPush(tokens, `Nouveau post dans ${zoneName}`, `${authorName} : ${description.slice(0, 80)}`, { screen: 'PublicationDetail', params: { id: String(pub._id) } });
+      } catch {}
+    })();
+
     res.status(201).json({ message: 'Publication créée', publication: pub });
   } catch (err) {
     console.error('[CREATE PUB]', err);
@@ -118,6 +147,7 @@ exports.getAll = async (req, res) => {
       mode,
       ville,
       auteur,
+      search,
     } = req.query;
 
     // Auto-archive posts whose time has expired
@@ -130,6 +160,7 @@ exports.getAll = async (req, res) => {
     const filter = { statut: 'active', expiresAt: { $gt: now } };
     if (mode)   filter.mode   = mode;
     if (auteur) filter.auteur = auteur;
+    if (search) filter.description = { $regex: search, $options: 'i' };
     if (ville) {
       filter.$or = [
         { 'localisation.ville':              { $regex: ville, $options: 'i' } },

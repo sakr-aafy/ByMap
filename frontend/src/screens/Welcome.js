@@ -37,7 +37,7 @@ export default function Welcome() {
   const progressWidth = progress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
 
   return (
-    <LinearGradient colors={['#0a1628', '#0f2040', '#0d1a30']} style={styles.root}>
+    <LinearGradient colors={['#ffffff', '#ffffff', '#ffffff']} style={styles.root}>
       <StatusBar style="light" />
 
       {/* Logo */}
@@ -71,9 +71,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 60,
   },
-  logo: {
+  /*logo: {
     width: width * 0.55,
     height: width * 0.55,
+  },*/
+  logo: {
+    width: width * 0.4,
+    height: width * 0.4,
   },
   barTrack: {
     position: 'absolute',

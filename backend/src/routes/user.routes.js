@@ -72,4 +72,8 @@ router.post('/me/points/buy', ctrl.buyPoints);
 // GET  /api/users/me/ads      → Publications de l'utilisateur connecté
 router.get('/me/ads', ctrl.getMyAds);
 
+// ── Push token ────────────────────────────────────────────────────────────────
+// PUT /api/users/push-token → Enregistrer le token Expo
+router.put('/push-token', ctrl.savePushToken);
+
 module.exports = router;

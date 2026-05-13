@@ -4,6 +4,18 @@
 const bcrypt = require('bcryptjs');
 const User   = require('../models/User.model');
 
+// ─── PUT /api/users/push-token ────────────────────────────────────────────────
+exports.savePushToken = async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token) return res.status(400).json({ message: 'Token requis' });
+    await User.findByIdAndUpdate(req.user.id, { pushToken: token });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/users/me
 // Vue 900 — Récupérer le profil de l'utilisateur connecté

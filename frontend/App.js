@@ -1,7 +1,9 @@
 // App.js
 import './src/i18n/index'; // initialise i18n (doit être le premier import)
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, Modal, StyleSheet } from 'react-native';
+import * as Notifications from 'expo-notifications';
+import { registerForPushNotifications, savePushTokenToServer } from './src/utils/notifications';
 import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { getStoredLanguage, changeAppLanguage } from './src/i18n/index';
 import { useTranslation } from 'react-i18next';
@@ -63,14 +65,39 @@ function IncomingCallOverlay() {
 const Stack = createStackNavigator();
 
 export default function App() {
-  const navigationRef = useNavigationContainerRef();
+  const navigationRef   = useNavigationContainerRef();
   const [langReady, setLangReady] = useState(false);
+  const notifListener   = useRef(null);
+  const responseListener = useRef(null);
 
   // Restaure la langue persistée avant le premier rendu
   useEffect(() => {
     getStoredLanguage().then(code => {
       changeAppLanguage(code).finally(() => setLangReady(true));
     });
+  }, []);
+
+  // Push notifications : demande permission + enregistre le token
+  useEffect(() => {
+    registerForPushNotifications().then(token => {
+      if (token) savePushTokenToServer(token);
+    });
+
+    // Notification reçue en foreground (affichée automatiquement par le handler)
+    notifListener.current = Notifications.addNotificationReceivedListener(() => {});
+
+    // Tap sur une notification → naviguer vers l'écran concerné
+    responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
+      const data = response.notification.request.content.data;
+      if (data?.screen && navigationRef.isReady()) {
+        navigationRef.navigate(data.screen, data.params || {});
+      }
+    });
+
+    return () => {
+      notifListener.current && Notifications.removeNotificationSubscription(notifListener.current);
+      responseListener.current && Notifications.removeNotificationSubscription(responseListener.current);
+    };
   }, []);
 
   if (!langReady) return null; // écran blanc pendant <100ms

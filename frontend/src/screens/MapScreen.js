@@ -599,6 +599,9 @@ export default function MapScreen() {
   const [errorMsg, setErrorMsg] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [suggestions, setSuggestions] = useState([]);
+  const [pubResults,  setPubResults]  = useState([]);
+  const [pubLoading,  setPubLoading]  = useState(false);
+  const pubSearchTimer = useRef(null);
   const [menuOpen,  setMenuOpen]  = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [modeView,  setModeView]  = useState('local'); // 'local' | 'duo'
@@ -954,31 +957,52 @@ export default function MapScreen() {
     );
   }, [zoneRadius, ready]);
 
-  // Recherche Nominatim (avec cache)
-  const searchPlace = async (query) => {
+  const handleSearch = (query) => {
     setSearchQuery(query);
-    if (query.length < 3) { setSuggestions([]); return; }
-    try {
-      const data = await cachedSearch(query, async (q) => {
+    if (query.length < 2) { setSuggestions([]); setPubResults([]); setPubLoading(false); return; }
+
+    // Nominatim (lieux)
+    if (query.length >= 3) {
+      cachedSearch(query, async (q) => {
         const res = await fetch(
-          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=5&accept-language=fr`,
+          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=4&accept-language=fr`,
           { headers: { 'User-Agent': 'ByMap/1.0' } }
         );
         return res.json();
-      });
-      setSuggestions(data || []);
-    } catch { setSuggestions([]); }
+      }).then(data => setSuggestions(data || [])).catch(() => setSuggestions([]));
+    }
+
+    // Publications (debounced)
+    if (pubSearchTimer.current) clearTimeout(pubSearchTimer.current);
+    setPubLoading(true);
+    pubSearchTimer.current = setTimeout(async () => {
+      try {
+        const res  = await fetch(`${API_URL}/publications?search=${encodeURIComponent(query)}&limit=5`);
+        const data = await res.json();
+        setPubResults(data.publications || []);
+      } catch { setPubResults([]); }
+      finally { setPubLoading(false); }
+    }, 400);
   };
 
   const goToPlace = (place) => {
-    const lat = parseFloat(place.lat);
-    const lng = parseFloat(place.lon);
-    setSearchQuery(place.display_name.split(',')[0]);
+    const lat  = parseFloat(place.lat);
+    const lng  = parseFloat(place.lon);
+    const name = place.display_name.split(',')[0];
+    setSearchQuery(name);
     setSuggestions([]);
+    setPubResults([]);
     Keyboard.dismiss();
+    // Snap the map + circle to this location, then open the zone screen
     setMapCenter({ latitude: lat, longitude: lng });
-    setReady(false);
-    setMode('map');
+    setPickedCenter({ latitude: lat, longitude: lng });
+    currentCenter.current = { latitude: lat, longitude: lng };
+    if (webViewRef.current) {
+      webViewRef.current.injectJavaScript(
+        `window.snapZoneToPoint(${lat}, ${lng}, 1000, '${name.replace(/'/g, '')}'); true;`
+      );
+    }
+    navigation.navigate('Local', { zone: name });
   };
 
   const toggleMenu = () => {
@@ -1125,12 +1149,12 @@ export default function MapScreen() {
               placeholder={t('map.searchPlaceholder')}
               placeholderTextColor="rgba(255,255,255,0.45)"
               value={searchQuery}
-              onChangeText={searchPlace}
+              onChangeText={handleSearch}
               returnKeyType="search"
               onSubmitEditing={() => suggestions.length > 0 && goToPlace(suggestions[0])}
             />
             {searchQuery.length > 0 && (
-              <TouchableOpacity onPress={() => { setSearchQuery(''); setSuggestions([]); }}>
+              <TouchableOpacity onPress={() => { setSearchQuery(''); setSuggestions([]); setPubResults([]); }}>
                 <FontAwesome6 name="xmark" size={13} color="#9CA3AF" />
               </TouchableOpacity>
             )}
@@ -1143,6 +1167,76 @@ export default function MapScreen() {
             <View style={styles.menuLine} />
           </TouchableOpacity>
         </View>
+
+        {/* ── Résultats combinés (lieux + posts) ── */}
+        {(suggestions.length > 0 || pubResults.length > 0 || pubLoading) && (
+          <View style={styles.suggestionsBox}>
+
+            {/* Section Lieux */}
+            {suggestions.length > 0 && (
+              <>
+                <View style={styles.resultSectionHeader}>
+                  <FontAwesome6 name="map-location-dot" size={10} color="#9CA3AF" />
+                  <Text style={styles.resultSectionTitle}>Lieux</Text>
+                </View>
+                {suggestions.map((item, i) => (
+                  <TouchableOpacity
+                    key={'place-' + i}
+                    style={[styles.suggestionRow, styles.suggestionBorder]}
+                    onPress={() => goToPlace(item)}
+                    activeOpacity={0.7}
+                  >
+                    <FontAwesome6 name="location-dot" size={15} color="#2DBD7E" />
+                    <View style={styles.suggestionTexts}>
+                      <Text style={styles.suggestionTitle} numberOfLines={1}>{item.display_name.split(',')[0]}</Text>
+                      <Text style={styles.suggestionSub} numberOfLines={1}>{item.display_name.split(',').slice(1, 3).join(', ')}</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </>
+            )}
+
+            {/* Section Posts */}
+            {(pubResults.length > 0 || pubLoading) && (
+              <>
+                <View style={styles.resultSectionHeader}>
+                  <FontAwesome6 name="newspaper" size={10} color="#9CA3AF" />
+                  <Text style={styles.resultSectionTitle}>Publications</Text>
+                  {pubLoading && <ActivityIndicator size="small" color="#9CA3AF" style={{ marginLeft: 4 }} />}
+                </View>
+                {pubResults.map((pub, i) => {
+                  const loc = pub.localisation?.gouvernorat || pub.localisation?.ville
+                    || pub.localisationDebut?.gouvernorat || pub.localisationDebut?.ville || '';
+                  const thumb = pub.medias?.[0]?.url;
+                  return (
+                    <TouchableOpacity
+                      key={'pub-' + (pub._id || i)}
+                      style={[styles.suggestionRow, i < pubResults.length - 1 && styles.suggestionBorder]}
+                      onPress={() => { navigation.navigate('PublicationDetail', { id: pub._id }); setSearchQuery(''); setSuggestions([]); setPubResults([]); Keyboard.dismiss(); }}
+                      activeOpacity={0.7}
+                    >
+                      {thumb
+                        ? <Image source={{ uri: thumb }} style={styles.pubResultThumb} />
+                        : <View style={[styles.pubResultThumb, { backgroundColor: 'rgba(45,189,126,0.12)', justifyContent: 'center', alignItems: 'center' }]}>
+                            <FontAwesome6 name="image" size={14} color="#2DBD7E" />
+                          </View>
+                      }
+                      <View style={styles.suggestionTexts}>
+                        <Text style={styles.suggestionTitle} numberOfLines={2}>{pub.description || '—'}</Text>
+                        {loc ? <Text style={styles.suggestionSub} numberOfLines={1}>📍 {loc}</Text> : null}
+                      </View>
+                      <View style={[styles.pubResultModeBadge, { backgroundColor: pub.mode === 'duo' ? 'rgba(59,126,246,0.15)' : 'rgba(45,189,126,0.15)' }]}>
+                        <Text style={[styles.pubResultModeText, { color: pub.mode === 'duo' ? '#3B7EF6' : '#2DBD7E' }]}>
+                          {pub.mode === 'duo' ? 'DUO' : 'LOCAL'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </>
+            )}
+          </View>
+        )}
 
         {/* ── Bandeau nom de zone ── */}
         {!menuOpen && suggestions.length === 0 && mode === 'map' && (
@@ -1628,6 +1722,20 @@ const styles = StyleSheet.create({
   suggestionTexts: { flex: 1 },
   suggestionTitle: { color: '#1A1A2E', fontSize: 14, fontWeight: '600' },
   suggestionSub: { color: '#9CA3AF', fontSize: 11, marginTop: 2 },
+
+  // ── En-têtes de section dans les résultats ──────────────────────────────
+  resultSectionHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 14, paddingVertical: 7,
+    backgroundColor: '#F9FAFB',
+    borderBottomWidth: 1, borderBottomColor: '#F3F4F6',
+  },
+  resultSectionTitle: { fontSize: 11, fontWeight: '700', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: 0.5 },
+
+  // ── Résultats post search ────────────────────────────────────────────────
+  pubResultThumb: { width: 44, height: 44, borderRadius: 8, overflow: 'hidden' },
+  pubResultModeBadge: { borderRadius: 8, paddingHorizontal: 7, paddingVertical: 3 },
+  pubResultModeText:  { fontSize: 10, fontWeight: '800', letterSpacing: 0.3 },
 
   // ── Menu déroulant ───────────────────────────────────────────────────────
   menuDropdown: {
