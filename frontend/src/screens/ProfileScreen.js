@@ -21,6 +21,7 @@ import { changeAppLanguage, LANGUAGE_MAP, LANGUAGE_NAMES } from '../i18n/index';
 
 const API_URL = environment.apiUrl;
 
+
 // ── Palette mint clair ─────────────────────────────────────────────────────────
 const C = {
   green:     '#2DBD7E', greenGlow: 'rgba(45,189,126,0.12)',
@@ -39,7 +40,8 @@ const C = {
 // ── VIEW 900 — Profile principal ───────────────────────────────────────────────
 function ProfileMain({ user, localCount, duoCount, onEditProfile, onSettings, onMyAds, onHelpSupport, onLogOut, onBuyPoints }) {
   const { t } = useTranslation();
-  const solde = typeof user?.pointsSolde === 'number' ? user.pointsSolde : 100;
+  const solde      = typeof user?.pointsSolde        === 'number' ? user.pointsSolde        : 0;
+  const freePosts  = typeof user?.freePostsRemaining === 'number' ? user.freePostsRemaining : 0;
   return (
     <ScrollView contentContainerStyle={styles.pageContent} showsVerticalScrollIndicator={false}>
       <View style={styles.avatarCircle}>
@@ -50,20 +52,42 @@ function ProfileMain({ user, localCount, duoCount, onEditProfile, onSettings, on
       <Text style={styles.profileName}>{user ? `${user.prenom || ''} ${user.nom || ''}`.trim() || t('profile.unknown') : t('profile.unknown')}</Text>
       <Text style={styles.profileEmail} numberOfLines={1}>{user?.email || user?.phone || ''}</Text>
 
-      {/* ── Solde de points ── */}
-      <View style={styles.pointsBox}>
-        <View style={styles.pointsBoxLeft}>
-          <FontAwesome6 name="coins" size={16} color="#F59E0B" />
-          <Text style={styles.pointsBoxLabel}>Solde de points</Text>
+      {/* ── Soldes : deux cartes côte à côte ── */}
+      <View style={styles.soldesRow}>
+
+        {/* Posts gratuits — vert */}
+        <View style={[styles.soldeCard, styles.soldeCardGreen]}>
+          <View style={styles.soldeCardTop}>
+            <FontAwesome6 name="newspaper" size={15} color={C.green} />
+            <Text style={[styles.soldeCardLabel, { color: C.green }]}>Posts gratuits</Text>
+          </View>
+          <Text style={[styles.soldeCardValue, { color: freePosts === 0 ? C.red : C.green }]}>
+            {freePosts}
+          </Text>
+          <Text style={styles.soldeCardSub}>
+            {freePosts === 0 ? 'Épuisés' : freePosts === 1 ? 'Dernier post' : 'restants'}
+          </Text>
         </View>
-        <View style={styles.pointsBoxRight}>
-          <Text style={styles.pointsBoxValue}>{solde} pts</Text>
-          {solde <= 0 && (
+
+        {/* Points — orange */}
+        <View style={[styles.soldeCard, styles.soldeCardOrange]}>
+          <View style={styles.soldeCardTop}>
+            <FontAwesome6 name="coins" size={15} color="#F59E0B" />
+            <Text style={[styles.soldeCardLabel, { color: '#92400E' }]}>Solde de points</Text>
+          </View>
+          <Text style={[styles.soldeCardValue, { color: solde <= 10 ? C.red : '#F59E0B' }]}>
+            {solde}
+          </Text>
+          <Text style={styles.soldeCardSub}>
+            {solde === 0 ? 'Épuisés' : solde <= 10 ? 'Solde faible !' : 'points'}
+          </Text>
+          {solde === 0 && (
             <TouchableOpacity style={styles.buyPointsBtn} onPress={onBuyPoints} activeOpacity={0.85}>
               <Text style={styles.buyPointsBtnText}>+ Acheter</Text>
             </TouchableOpacity>
           )}
         </View>
+
       </View>
 
       <View style={styles.activeAdsBox}>
@@ -462,10 +486,32 @@ function MyAdsView({ ads, loading, onSelectAd, onRenew, onDelete, renewing, user
         data={ads} keyExtractor={item => item._id}
         contentContainerStyle={styles.adsList} showsVerticalScrollIndicator={false}
       ListHeaderComponent={
-        <View style={styles.adsListHeader}>
-          <Text style={styles.adsListTitle}>{t('profile.myAds')}</Text>
-          <View style={styles.adsListCount}><Text style={styles.adsListCountText}>{ads.length}</Text></View>
-        </View>
+        <>
+          <View style={styles.adsListHeader}>
+            <Text style={styles.adsListTitle}>{t('profile.myAds')}</Text>
+            <View style={styles.adsListCount}><Text style={styles.adsListCountText}>{ads.length}</Text></View>
+          </View>
+          {/* ── Bandeau solde renouvellement ── */}
+          <View style={styles.renewSoldeBanner}>
+            <View style={styles.renewSoldeItem}>
+              <FontAwesome6 name="newspaper" size={13} color={C.green} />
+              <Text style={[styles.renewSoldeVal, { color: (user?.freePostsRemaining ?? 0) === 0 ? C.red : C.green }]}>
+                {user?.freePostsRemaining ?? 0}
+              </Text>
+              <Text style={styles.renewSoldeLabel}>posts gratuits</Text>
+            </View>
+            <View style={styles.renewSoldeSep} />
+            <View style={styles.renewSoldeItem}>
+              <FontAwesome6 name="coins" size={13} color="#F59E0B" />
+              <Text style={[styles.renewSoldeVal, { color: (user?.pointsSolde ?? 0) <= 10 ? C.red : '#F59E0B' }]}>
+                {user?.pointsSolde ?? 0}
+              </Text>
+              <Text style={styles.renewSoldeLabel}>points</Text>
+            </View>
+            <View style={styles.renewSoldeSep} />
+            <Text style={styles.renewSoldeHint}>Renouveler = 1 post gratuit ou 10 pts</Text>
+          </View>
+        </>
       }
       ListEmptyComponent={
         <View style={styles.emptyBox}>
@@ -553,68 +599,160 @@ function MyAdsView({ ads, loading, onSelectAd, onRenew, onDelete, renewing, user
 }
 
 // ── VIEW 602 — Ad Detail ───────────────────────────────────────────────────────
-function AdDetailView({ ad, onRenew, onDelete, renewing }) {
+function AdDetailView({ ad, onRenew, onDelete, renewing, user }) {
   const { t } = useTranslation();
-  const isLocal   = ad.mode === 'local';
-  const accent    = isLocal ? C.green : C.blue;
+  const isLocal    = ad.mode === 'local';
+  const accent     = isLocal ? C.green : C.blue;
   const accentGlow = isLocal ? C.greenGlow : C.blueGlow;
-  const exp       = ad.expiresAt ? new Date(ad.expiresAt) : new Date(new Date(ad.createdAt).getTime() + 24 * 3600 * 1000);
-  const hoursLeft = Math.max(0, Math.round((exp - Date.now()) / 3600000));
-  const firstImg  = ad.medias?.find(m => m.type === 'image');
-  const locLabel  = isLocal ? [ad.localisation?.ville, ad.localisation?.gouvernorat].filter(Boolean).join(', ') : [ad.localisationDebut?.ville, '→', ad.localisationFin?.ville].filter(Boolean).join(' ');
+  const exp        = ad.expiresAt ? new Date(ad.expiresAt) : new Date(new Date(ad.createdAt).getTime() + 24 * 3600 * 1000);
+  const hoursLeft  = Math.max(0, Math.round((exp - Date.now()) / 3600000));
+  const expired    = hoursLeft <= 0;
+  const firstImg   = ad.medias?.find(m => m.type === 'image');
+  const locLabel   = isLocal
+    ? [ad.localisation?.ville, ad.localisation?.gouvernorat].filter(Boolean).join(', ')
+    : [ad.localisationDebut?.ville, '→', ad.localisationFin?.ville].filter(Boolean).join(' ');
+  const freePosts  = user?.freePostsRemaining ?? 0;
+  const points     = user?.pointsSolde ?? 0;
+
   return (
     <ScrollView contentContainerStyle={styles.adDetailContent} showsVerticalScrollIndicator={false}>
-      {firstImg
-        ? <Image source={{ uri: firstImg.url }} style={styles.adDetailImage} />
-        : <View style={[styles.adDetailImagePlaceholder, { backgroundColor: accentGlow }]}>
-            <FontAwesome6 name={isLocal ? 'location-dot' : 'handshake'} size={40} color={accent} />
-          </View>}
-      {!!locLabel && (
-        <View style={[styles.adDetailLocPill, { borderColor: accent, backgroundColor: accentGlow }]}>
-          <FontAwesome6 name="location-dot" size={12} color={accent} />
-          <Text style={[styles.adDetailLocText, { color: accent }]}> {locLabel}</Text>
+
+      {/* ── Hero image ── */}
+      <View style={styles.adDetailHero}>
+        {firstImg
+          ? <Image source={{ uri: firstImg.url }} style={styles.adDetailImage} resizeMode="cover" />
+          : <View style={[styles.adDetailImagePlaceholder, { backgroundColor: accentGlow }]}>
+              <FontAwesome6 name={isLocal ? 'location-dot' : 'handshake'} size={48} color={accent} />
+            </View>}
+        {/* Mode pill overlay */}
+        <View style={[styles.adDetailModePill, { backgroundColor: accent }]}>
+          <View style={styles.adDetailModeDot} />
+          <Text style={styles.adDetailModeText}>{isLocal ? 'LOCAL' : 'DUO'}</Text>
         </View>
-      )}
-      <Text style={[styles.adDetailTime, { color: hoursLeft > 0 ? '#FF9500' : C.red }]}>
-        {hoursLeft > 0 ? t('profile.hoursLeft', { diff: hoursLeft }) : t('profile.expired')}
-      </Text>
-      <Text style={styles.adDetailDesc}>{ad.description}</Text>
-      <Text style={styles.statsTitle}>{t('profile.stats')}</Text>
-      <View style={styles.statsRow}>
-        <View style={styles.statCard}>
-          <Text style={styles.statCount}>{ad.vues ?? 0}</Text>
-          <Text style={styles.statLabel}>{t('profile.views')}</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statCount}>{ad.nbLikes ?? ad.likes?.length ?? 0}</Text>
-          <Text style={styles.statLabel}>{t('profile.contacts')}</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statCount}>{ad.nbScans ?? 0}</Text>
-          <Text style={styles.statLabel}>{t('profile.scans')}</Text>
+        {/* Time pill overlay */}
+        <View style={[styles.adDetailTimePill, {
+          backgroundColor: expired ? 'rgba(239,68,68,0.92)' : 'rgba(255,149,0,0.92)',
+        }]}>
+          <FontAwesome6 name={expired ? 'triangle-exclamation' : 'clock'} size={10} color="#FFF" />
+          <Text style={styles.adDetailTimePillText}>
+            {' '}{expired ? t('profile.expired') : t('profile.hoursLeft', { diff: hoursLeft })}
+          </Text>
         </View>
       </View>
-      <TouchableOpacity style={[styles.primaryBtn, { marginHorizontal: 16, marginTop: 24 }, renewing && { opacity: 0.7 }]} onPress={onRenew} activeOpacity={0.85} disabled={renewing}>
-        {renewing ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryBtnText}>{t('profile.renew24')}</Text>}
+
+      {/* ── Location pill ── */}
+      {!!locLabel && (
+        <View style={styles.adDetailLocRow}>
+          <View style={[styles.adDetailLocPill, { borderColor: accent, backgroundColor: accentGlow }]}>
+            <FontAwesome6 name={isLocal ? 'location-dot' : 'route'} size={12} color={accent} />
+            <Text style={[styles.adDetailLocText, { color: accent }]}> {locLabel}</Text>
+          </View>
+        </View>
+      )}
+
+      {/* ── Description card ── */}
+      {!!ad.description && (
+        <View style={styles.adDetailCard}>
+          <Text style={styles.adDetailCardLabel}>Description</Text>
+          <Text style={styles.adDetailDesc}>{ad.description}</Text>
+        </View>
+      )}
+
+      {/* ── Stats card ── */}
+      <View style={[styles.adDetailCard, { flexDirection: 'row', padding: 0, overflow: 'hidden' }]}>
+        {[
+          { icon: 'eye',         count: ad.vues ?? 0,                          label: t('profile.views') },
+          { icon: 'heart',       count: ad.nbLikes ?? ad.likes?.length ?? 0,   label: t('profile.contacts') },
+          { icon: 'qrcode',      count: ad.nbScans ?? 0,                       label: t('profile.scans') },
+        ].map((s, i) => (
+          <View key={i} style={[styles.adDetailStatCell, i > 0 && { borderLeftWidth: 1, borderLeftColor: C.border }]}>
+            <FontAwesome6 name={s.icon} size={18} color={accent} />
+            <Text style={[styles.adDetailStatCount, { color: accent }]}>{s.count}</Text>
+            <Text style={styles.adDetailStatLabel}>{s.label}</Text>
+          </View>
+        ))}
+      </View>
+
+      {/* ── Solde renouvellement ── */}
+      <View style={styles.adDetailSoldeCard}>
+        <Text style={styles.adDetailSoldeTitle}>Coût du renouvellement</Text>
+        <View style={styles.adDetailSoldeRow}>
+          <View style={styles.adDetailSoldeItem}>
+            <FontAwesome6 name="newspaper" size={14} color={C.green} />
+            <Text style={[styles.adDetailSoldeVal, { color: freePosts === 0 ? C.red : C.green }]}>{freePosts}</Text>
+            <Text style={styles.adDetailSoldeLabel}>posts gratuits</Text>
+          </View>
+          <View style={styles.adDetailSoldeDivider} />
+          <View style={styles.adDetailSoldeItem}>
+            <FontAwesome6 name="coins" size={14} color="#F59E0B" />
+            <Text style={[styles.adDetailSoldeVal, { color: points <= 10 ? C.red : '#F59E0B' }]}>{points}</Text>
+            <Text style={styles.adDetailSoldeLabel}>points</Text>
+          </View>
+          <View style={styles.adDetailSoldeDivider} />
+          <View style={styles.adDetailSoldeHintBox}>
+            <Text style={styles.adDetailSoldeHint}>1 post gratuit</Text>
+            <Text style={styles.adDetailSoldeHintOr}>ou</Text>
+            <Text style={styles.adDetailSoldeHint}>10 pts</Text>
+          </View>
+        </View>
+      </View>
+
+      {/* ── Actions ── */}
+      <TouchableOpacity
+        style={[styles.adDetailRenewBtn, { backgroundColor: accent }, renewing && { opacity: 0.7 }]}
+        onPress={onRenew}
+        activeOpacity={0.85}
+        disabled={renewing}
+      >
+        {renewing
+          ? <ActivityIndicator color="#FFFFFF" />
+          : <>
+              <FontAwesome6 name="rotate" size={16} color="#FFF" />
+              <Text style={styles.adDetailRenewBtnText}>{t('profile.renew24')}</Text>
+            </>}
       </TouchableOpacity>
-      <TouchableOpacity style={styles.deleteAdBtn} onPress={onDelete} activeOpacity={0.85}>
-        <Text style={styles.deleteAdBtnText}>{t('profile.deleteAd')}</Text>
+
+      <TouchableOpacity style={styles.adDetailDeleteBtn} onPress={onDelete} activeOpacity={0.85}>
+        <FontAwesome6 name="trash" size={14} color={C.red} />
+        <Text style={styles.adDetailDeleteBtnText}>{t('profile.deleteAd')}</Text>
       </TouchableOpacity>
+
     </ScrollView>
   );
 }
 
 // ── VIEW 603 — Renewed ─────────────────────────────────────────────────────────
-function RenewedView({ onBackToAds }) {
+function RenewedView({ onBackToAds, renewResult }) {
   const { t } = useTranslation();
+  const usedFree  = renewResult?.usedFreePost ?? false;
+  const freePosts = renewResult?.freePostsRemaining ?? 0;
+  const points    = renewResult?.pointsSolde ?? 0;
   return (
     <View style={styles.updatedCenter}>
       <View style={styles.checkCircle}>
         <FontAwesome6 name="check" size={32} color={C.green} />
       </View>
       <Text style={styles.updatedTitle}>{t('profile.renewed')}</Text>
-      <Text style={styles.renewedSub}>{t('profile.renewedSub')}</Text>
-      <TouchableOpacity style={[styles.primaryBtn, { marginTop: 32, width: '80%' }]} onPress={onBackToAds} activeOpacity={0.85}>
+      <Text style={styles.renewedSub}>
+        {usedFree
+          ? `1 post gratuit utilisé · il vous reste ${freePosts} post${freePosts !== 1 ? 's' : ''} gratuit${freePosts !== 1 ? 's' : ''}`
+          : `10 points déduits · il vous reste ${points} pt${points !== 1 ? 's' : ''}`}
+      </Text>
+      {/* ── Soldes mis à jour ── */}
+      <View style={[styles.renewSoldeBanner, { marginTop: 20, width: '85%' }]}>
+        <View style={styles.renewSoldeItem}>
+          <FontAwesome6 name="newspaper" size={13} color={C.green} />
+          <Text style={[styles.renewSoldeVal, { color: freePosts === 0 ? C.red : C.green }]}>{freePosts}</Text>
+          <Text style={styles.renewSoldeLabel}>posts gratuits</Text>
+        </View>
+        <View style={styles.renewSoldeSep} />
+        <View style={styles.renewSoldeItem}>
+          <FontAwesome6 name="coins" size={13} color="#F59E0B" />
+          <Text style={[styles.renewSoldeVal, { color: points <= 10 ? C.red : '#F59E0B' }]}>{points}</Text>
+          <Text style={styles.renewSoldeLabel}>points</Text>
+        </View>
+      </View>
+      <TouchableOpacity style={[styles.primaryBtn, { marginTop: 24, width: '80%' }]} onPress={onBackToAds} activeOpacity={0.85}>
         <Text style={styles.primaryBtnText}>{t('profile.backToAds')}</Text>
       </TouchableOpacity>
     </View>
@@ -765,8 +903,9 @@ export default function ProfileScreen() {
   const [myAds,      setMyAds]      = useState([]);
   const [adsLoading, setAdsLoading] = useState(false);
   const [selectedAd, setSelectedAd] = useState(null);
-  const [renewing,   setRenewing]   = useState(false);
-  const [deleting,   setDeleting]   = useState(false);
+  const [renewing,    setRenewing]    = useState(false);
+  const [deleting,    setDeleting]    = useState(false);
+  const [renewResult, setRenewResult] = useState(null);
 
   const fetchMyAds = async () => {
     setAdsLoading(true);
@@ -807,10 +946,31 @@ export default function ProfileScreen() {
 
   const handleRenew = async (ad) => {
     const target = ad || selectedAd;
-    if (!target) return; setRenewing(true);
+    if (!target) return;
+    setRenewing(true);
     try {
       const token = await AsyncStorage.getItem('accessToken');
-      await fetch(`${API_URL}/publications/${target._id}/renew`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {} });
+      const res   = await fetch(`${API_URL}/publications/${target._id}/renew`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        Alert.alert('Solde insuffisant', data.message || t('profile.renewError'));
+        return;
+      }
+      // Mettre à jour le solde affiché localement
+      setRenewResult(data);
+      setCurrentUser(prev => prev ? {
+        ...prev,
+        pointsSolde:        data.pointsSolde,
+        freePostsRemaining: data.freePostsRemaining,
+      } : prev);
+      await AsyncStorage.setItem('currentUser', JSON.stringify({
+        ...currentUser,
+        pointsSolde:        data.pointsSolde,
+        freePostsRemaining: data.freePostsRemaining,
+      }));
       setView('renewed');
     } catch { Alert.alert(t('common.error'), t('profile.renewError')); }
     finally { setRenewing(false); }
@@ -892,8 +1052,8 @@ export default function ProfileScreen() {
         {view === 'changepassword'&& <ChangePasswordView onSuccess={() => setView('settings')} />}
         {view === 'updated'       && <ProfileUpdatedView user={currentUser} onBackToProfile={() => setView('main')} />}
         {view === 'myads'         && <MyAdsView ads={myAds} loading={adsLoading} renewing={renewing} user={currentUser} onSelectAd={(ad) => { setSelectedAd(ad); setView('addetail'); }} onRenew={(ad) => { setSelectedAd(ad); handleRenew(ad); }} onDelete={(ad) => { setSelectedAd(ad); setView('deleteconfirm'); }} />}
-        {view === 'addetail' && selectedAd && <AdDetailView ad={selectedAd} renewing={renewing} onRenew={handleRenew} onDelete={() => setView('deleteconfirm')} />}
-        {view === 'renewed'       && <RenewedView onBackToAds={() => { fetchMyAds(); setView('myads'); }} />}
+        {view === 'addetail' && selectedAd && <AdDetailView ad={selectedAd} renewing={renewing} onRenew={handleRenew} onDelete={() => setView('deleteconfirm')} user={currentUser} />}
+        {view === 'renewed'       && <RenewedView renewResult={renewResult} onBackToAds={() => { fetchMyAds(); setView('myads'); }} />}
         {view === 'deleteconfirm' && <DeleteAdView deleting={deleting} onCancel={() => setView('addetail')} onConfirmDelete={handleDeleteConfirmed} />}
 
         {/* ── Bottom Tab Bar ── */}
@@ -1185,17 +1345,97 @@ const styles = StyleSheet.create({
 
   // Ad detail
   adDetailContent: { paddingBottom: 120, paddingTop: 0 },
-  adDetailImage:   { width: '100%', height: 220, resizeMode: 'cover' },
-  adDetailImagePlaceholder: { width: '100%', height: 180, justifyContent: 'center', alignItems: 'center' },
+
+  // Hero section
+  adDetailHero: { position: 'relative', width: '100%' },
+  adDetailImage: { width: '100%', height: 220 },
+  adDetailImagePlaceholder: {
+    width: '100%', height: 200,
+    justifyContent: 'center', alignItems: 'center',
+    backgroundColor: '#F2F5F3',
+  },
+  adDetailModePill: {
+    position: 'absolute', top: 12, left: 12,
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingHorizontal: 10, paddingVertical: 5,
+    borderRadius: 20,
+  },
+  adDetailModeDot: {
+    width: 6, height: 6, borderRadius: 3, backgroundColor: '#FFFFFF',
+  },
+  adDetailModeText: { fontSize: 11, fontWeight: '900', color: '#FFFFFF', letterSpacing: 0.8 },
+  adDetailTimePill: {
+    position: 'absolute', top: 12, right: 12,
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 10, paddingVertical: 5,
+    borderRadius: 20,
+  },
+  adDetailTimePillText: { fontSize: 11, fontWeight: '800', color: '#FFFFFF' },
+
+  // Location row
+  adDetailLocRow: { paddingHorizontal: 16, paddingTop: 14 },
   adDetailLocPill: {
     flexDirection: 'row', alignItems: 'center',
     alignSelf: 'flex-start', borderRadius: 20, borderWidth: 1.5,
     paddingHorizontal: 14, paddingVertical: 6,
-    marginHorizontal: 16, marginTop: 14,
   },
   adDetailLocText: { fontSize: 13, fontWeight: '700' },
-  adDetailTime:    { fontSize: 13, fontWeight: '700', marginHorizontal: 16, marginTop: 8 },
-  adDetailDesc:    { fontSize: 14, color: '#4B5563', lineHeight: 20, marginHorizontal: 16, marginTop: 10 },
+
+  // Content card
+  adDetailCard: {
+    marginHorizontal: 16, marginTop: 12,
+    backgroundColor: '#FFFFFF', borderRadius: 16,
+    borderWidth: 1, borderColor: '#F0F0F0',
+    padding: 16,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04, shadowRadius: 8, elevation: 2,
+  },
+  adDetailCardLabel: { fontSize: 11, fontWeight: '700', color: '#9CA3AF', letterSpacing: 0.6, marginBottom: 8, textTransform: 'uppercase' },
+  adDetailDesc: { fontSize: 14, color: '#4B5563', lineHeight: 21 },
+
+  // Stats cells inside adDetailCard
+  adDetailStatCell: {
+    flex: 1, alignItems: 'center', paddingVertical: 16, gap: 5,
+  },
+  adDetailStatCount: { fontSize: 24, fontWeight: '900' },
+  adDetailStatLabel: { fontSize: 11, color: '#9CA3AF', fontWeight: '600' },
+
+  // Solde renewal card
+  adDetailSoldeCard: {
+    marginHorizontal: 16, marginTop: 12,
+    backgroundColor: '#FFFFFF', borderRadius: 16,
+    borderWidth: 1, borderColor: '#F0F0F0',
+    padding: 14,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04, shadowRadius: 8, elevation: 2,
+  },
+  adDetailSoldeTitle: { fontSize: 11, fontWeight: '700', color: '#9CA3AF', letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 12 },
+  adDetailSoldeRow: { flexDirection: 'row', alignItems: 'center' },
+  adDetailSoldeItem: { flex: 1, alignItems: 'center', gap: 3 },
+  adDetailSoldeVal: { fontSize: 20, fontWeight: '900' },
+  adDetailSoldeLabel: { fontSize: 10, fontWeight: '600', color: '#9CA3AF' },
+  adDetailSoldeDivider: { width: 1, height: 36, backgroundColor: '#E5E7EB' },
+  adDetailSoldeHintBox: { flex: 1, alignItems: 'center', gap: 1 },
+  adDetailSoldeHint: { fontSize: 11, fontWeight: '700', color: '#1A1A2E' },
+  adDetailSoldeHintOr: { fontSize: 10, color: '#9CA3AF' },
+
+  // Renew & delete buttons
+  adDetailRenewBtn: {
+    marginHorizontal: 16, marginTop: 16,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
+    borderRadius: 16, paddingVertical: 16,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15, shadowRadius: 10, elevation: 4,
+  },
+  adDetailRenewBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 15, letterSpacing: 0.5 },
+  adDetailDeleteBtn: {
+    marginHorizontal: 16, marginTop: 10, marginBottom: 8,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    borderRadius: 16, borderWidth: 1.5, borderColor: '#EF4444', paddingVertical: 14,
+  },
+  adDetailDeleteBtnText: { color: '#EF4444', fontWeight: '700', fontSize: 14 },
+
+  // Legacy (still used by statsRow/statCard in MyAdsView header)
   statsTitle:      { fontSize: 15, fontWeight: '800', color: '#1A1A2E', marginHorizontal: 16, marginTop: 20, marginBottom: 10 },
   statsRow:        { flexDirection: 'row', gap: 12, marginHorizontal: 16 },
   statCard: {
@@ -1209,7 +1449,21 @@ const styles = StyleSheet.create({
   deleteAdBtn:     { marginHorizontal: 16, marginTop: 10, borderRadius: 14, borderWidth: 2, borderColor: '#EF4444', paddingVertical: 15, alignItems: 'center' },
   deleteAdBtnText: { color: '#EF4444', fontWeight: '800', fontSize: 15, letterSpacing: 0.5 },
 
-  renewedSub: { fontSize: 14, color: '#9CA3AF', marginTop: 8, textAlign: 'center' },
+  renewedSub: { fontSize: 14, color: '#9CA3AF', marginTop: 8, textAlign: 'center', paddingHorizontal: 24 },
+
+  // Bandeau solde renouvellement
+  renewSoldeBanner: {
+    flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap',
+    backgroundColor: '#F8FAFB', borderRadius: 14,
+    borderWidth: 1, borderColor: C.border,
+    paddingHorizontal: 14, paddingVertical: 10,
+    marginHorizontal: 16, marginBottom: 8, gap: 6,
+  },
+  renewSoldeItem:  { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  renewSoldeVal:   { fontSize: 16, fontWeight: '900' },
+  renewSoldeLabel: { fontSize: 12, color: C.textFaint, fontWeight: '500' },
+  renewSoldeSep:   { width: 1, height: 18, backgroundColor: C.border, marginHorizontal: 4 },
+  renewSoldeHint:  { fontSize: 11, color: C.textFaint, fontStyle: 'italic', flexShrink: 1 },
   deleteCircle: {
     width: 80, height: 80, borderRadius: 40,
     backgroundColor: 'rgba(239,68,68,0.08)',
@@ -1242,18 +1496,23 @@ const styles = StyleSheet.create({
   langCancelBtn:     { alignItems: 'center', marginTop: 8, paddingVertical: 10 },
   langCancelText:    { fontSize: 14, color: '#9CA3AF', fontWeight: '600' },
 
-  // Points solde (vue 900)
-  pointsBox: {
-    width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: '#FFFBEB', borderRadius: 14, borderWidth: 1.5, borderColor: '#F59E0B',
-    paddingHorizontal: 16, paddingVertical: 12, marginBottom: 16,
+  // Soldes : deux cartes côte à côte (vue 900)
+  soldesRow: {
+    flexDirection: 'row', gap: 10, width: '100%', marginBottom: 16,
   },
-  pointsBoxLeft:  { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  pointsBoxLabel: { fontSize: 14, fontWeight: '700', color: '#92400E' },
-  pointsBoxRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  pointsBoxValue: { fontSize: 16, fontWeight: '900', color: '#F59E0B' },
-  buyPointsBtn:   { backgroundColor: '#F59E0B', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6 },
-  buyPointsBtnText: { fontSize: 12, fontWeight: '800', color: '#FFFFFF' },
+  soldeCard: {
+    flex: 1, borderRadius: 16, borderWidth: 1.5,
+    paddingHorizontal: 14, paddingVertical: 14,
+    alignItems: 'flex-start', gap: 2,
+  },
+  soldeCardGreen:  { backgroundColor: '#ECFDF5', borderColor: C.green },
+  soldeCardOrange: { backgroundColor: '#FFFBEB', borderColor: '#F59E0B' },
+  soldeCardTop:    { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  soldeCardLabel:  { fontSize: 12, fontWeight: '700' },
+  soldeCardValue:  { fontSize: 30, fontWeight: '900', lineHeight: 34 },
+  soldeCardSub:    { fontSize: 11, color: C.textFaint, fontWeight: '500' },
+  buyPointsBtn:    { backgroundColor: '#F59E0B', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, marginTop: 6 },
+  buyPointsBtnText:{ fontSize: 11, fontWeight: '800', color: '#FFFFFF' },
 
   // Buy points view (vue 905)
   pointsIconCircle: {

@@ -76,7 +76,8 @@ const UserSchema = new mongoose.Schema(
     pushToken: { type: String, default: '' },
 
     // ── Système de points ─────────────────────────────────────────────────────
-    pointsSolde: { type: Number, default: 100, min: 0 },
+    pointsSolde:        { type: Number, default: 100, min: 0 },
+    freePostsRemaining: { type: Number, default: 10,  min: 0 },
 
   },
   { timestamps: true }

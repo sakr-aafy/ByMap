@@ -109,7 +109,7 @@ export default function LoginScreen() {
   const initMode = route.params?.tab === 'login' ? 'login' : 'register';
 
   const [screen,   setScreen]   = useState(initMode); // 'register' | 'login'
-  const [regStep,  setRegStep]  = useState(1);         // 1 = identité+contact, 2 = mot de passe
+  const [regStep,  setRegStep]  = useState(1);         // 1 = contact, 2 = nom, 3 = mot de passe
   const [regType,  setRegType]  = useState('phone');   // 'phone' | 'email'
   const [loginTab, setLoginTab] = useState('phone');   // 'phone' | 'email'
 
@@ -145,7 +145,6 @@ export default function LoginScreen() {
   // ── Validation ─────────────────────────────────────────────────────────────
   const validateStep1 = () => {
     const e = {};
-    if (!prenom.trim()) e.prenom = 'Prénom requis';
     const val = regType === 'phone' ? phone : email;
     if (!val) {
       e.contact = regType === 'phone' ? 'Numéro requis' : 'E-mail requis';
@@ -158,6 +157,12 @@ export default function LoginScreen() {
   };
 
   const validateStep2 = () => {
+    const e = {};
+    if (!prenom.trim()) e.prenom = 'Prénom requis';
+    return e;
+  };
+
+  const validateStep3 = () => {
     const e = {};
     if (!password) e.password = 'Mot de passe requis';
     else if (password.length < 6) e.password = 'Minimum 6 caractères';
@@ -187,13 +192,18 @@ export default function LoginScreen() {
       if (Object.keys(e).length) { setErrors(e); return; }
       setErrors({});
       setRegStep(2);
+    } else if (regStep === 2) {
+      const e = validateStep2();
+      if (Object.keys(e).length) { setErrors(e); return; }
+      setErrors({});
+      setRegStep(3);
     } else {
       handleSignUp();
     }
   };
 
   const handleSignUp = async () => {
-    const e = validateStep2();
+    const e = validateStep3();
     if (Object.keys(e).length) { setErrors(e); return; }
     setErrors({});
     setLoading(true);
@@ -290,8 +300,9 @@ export default function LoginScreen() {
     }
   };
 
-  const canStep1  = prenom.trim().length > 0 && (phone.length > 0 || email.length > 0);
-  const canStep2  = password.length > 0 && confirm.length > 0;
+  const canStep1  = (regType === 'phone' ? phone : email).length > 0;
+  const canStep2  = prenom.trim().length > 0;
+  const canStep3  = password.length > 0 && confirm.length > 0;
   const canLogin  = (loginTab === 'phone' ? phone : email).length > 0 && password.length > 0;
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -333,11 +344,13 @@ export default function LoginScreen() {
                 <Text style={s.pageTitle}>Inscription</Text>
                 <Text style={s.pageSubtitle}>Rejoins la communauté locale ByMap</Text>
 
-                {/* Indicateur de progression */}
+                {/* Indicateur de progression — 3 étapes */}
                 <View style={s.progressRow}>
                   <View style={[s.progressDot, s.progressDotActive]} />
-                  <View style={[s.progressLine, regStep === 2 && s.progressLineActive]} />
-                  <View style={[s.progressDot, regStep === 2 && s.progressDotActive]} />
+                  <View style={[s.progressLine, regStep >= 2 && s.progressLineActive]} />
+                  <View style={[s.progressDot, regStep >= 2 && s.progressDotActive]} />
+                  <View style={[s.progressLine, regStep >= 3 && s.progressLineActive]} />
+                  <View style={[s.progressDot, regStep >= 3 && s.progressDotActive]} />
                 </View>
 
                 {errors.global ? (
@@ -350,37 +363,14 @@ export default function LoginScreen() {
                 {/* ── Carte principale ── */}
                 <View style={s.card}>
 
-                  {/* ── ÉTAPE 1 : identité + contact ── */}
+                  {/* ── ÉTAPE 1 : contact (téléphone ou e-mail) ── */}
                   {regStep === 1 && (
                     <>
                       <View style={s.cardTitleRow}>
                         <View style={[s.cardTitleBadge, { backgroundColor: C.greenGlow }]}>
-                          <Text style={[s.cardTitleBadgeText, { color: C.green }]}>1 / 2</Text>
+                          <Text style={[s.cardTitleBadgeText, { color: C.green }]}>1 / 3</Text>
                         </View>
-                        <Text style={s.cardTitle}>Informations personnelles</Text>
-                      </View>
-
-                      {/* Prénom + Nom côte à côte */}
-                      <View style={s.nameRow}>
-                        <View style={{ flex: 1 }}>
-                          <InputField
-                            iconName="user"
-                            placeholder="Prénom *"
-                            value={prenom}
-                            onChangeText={(v) => { setPrenom(v); setErrors(p => ({ ...p, prenom: '' })); }}
-                            error={errors.prenom}
-                            autoCapitalize="words"
-                          />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <InputField
-                            iconName="user"
-                            placeholder="Nom"
-                            value={nom}
-                            onChangeText={(v) => { setNom(v); setErrors(p => ({ ...p, nom: '' })); }}
-                            autoCapitalize="words"
-                          />
-                        </View>
+                        <Text style={s.cardTitle}>Votre contact</Text>
                       </View>
 
                       {/* Toggle téléphone / e-mail */}
@@ -411,6 +401,7 @@ export default function LoginScreen() {
                           prefix="+216  "
                           error={errors.contact}
                           maxLength={8}
+                          autoFocus
                         />
                       ) : (
                         <InputField
@@ -420,13 +411,14 @@ export default function LoginScreen() {
                           onChangeText={(v) => { setEmail(v); setErrors(p => ({ ...p, contact: '' })); }}
                           keyboardType="email-address"
                           error={errors.contact}
+                          autoFocus
                         />
                       )}
 
                       <TouchableOpacity
                         style={[s.primaryBtn, !canStep1 && s.primaryBtnOff]}
                         onPress={handleRegContinue}
-                        disabled={loading || !canStep1}
+                        disabled={!canStep1}
                         activeOpacity={0.85}
                       >
                         <LinearGradient
@@ -434,43 +426,106 @@ export default function LoginScreen() {
                           start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
                           style={s.primaryBtnGrad}
                         >
-                          {loading
-                            ? <ActivityIndicator color="#fff" />
-                            : (
-                              <>
-                                <Text style={s.primaryBtnText}>Continuer</Text>
-                                <FontAwesome6 name="arrow-right" size={14} color="#fff" style={{ marginLeft: 8 }} />
-                              </>
-                            )
-                          }
+                          <Text style={s.primaryBtnText}>Continuer</Text>
+                          <FontAwesome6 name="arrow-right" size={14} color="#fff" style={{ marginLeft: 8 }} />
                         </LinearGradient>
                       </TouchableOpacity>
                     </>
                   )}
 
-                  {/* ── ÉTAPE 2 : mot de passe ── */}
+                  {/* ── ÉTAPE 2 : nom & prénom ── */}
                   {regStep === 2 && (
                     <>
                       <View style={s.cardTitleRow}>
+                        <View style={[s.cardTitleBadge, { backgroundColor: C.greenGlow }]}>
+                          <Text style={[s.cardTitleBadgeText, { color: C.green }]}>2 / 3</Text>
+                        </View>
+                        <Text style={s.cardTitle}>Votre identité</Text>
+                      </View>
+
+                      {/* Récapitulatif contact */}
+                      <View style={s.identitySummary}>
+                        <View style={[s.identityAvatar, { backgroundColor: C.greenGlow, justifyContent: 'center', alignItems: 'center' }]}>
+                          <FontAwesome6 name={regType === 'phone' ? 'phone' : 'envelope'} size={16} color={C.green} />
+                        </View>
+                        <Text style={[s.identityContact, { flex: 1 }]}>
+                          {regType === 'phone' ? `+216 ${phone}` : email}
+                        </Text>
+                        <TouchableOpacity
+                          onPress={() => { setRegStep(1); setErrors({}); }}
+                          style={s.identityEditBtn}
+                          hitSlop={8}
+                        >
+                          <FontAwesome6 name="pen" size={12} color={C.green} />
+                          <Text style={s.identityEditText}>Modifier</Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Prénom + Nom côte à côte */}
+                      <View style={s.nameRow}>
+                        <View style={{ flex: 1 }}>
+                          <InputField
+                            iconName="user"
+                            placeholder="Prénom *"
+                            value={prenom}
+                            onChangeText={(v) => { setPrenom(v); setErrors(p => ({ ...p, prenom: '' })); }}
+                            error={errors.prenom}
+                            autoCapitalize="words"
+                            autoFocus
+                          />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <InputField
+                            iconName="user"
+                            placeholder="Nom"
+                            value={nom}
+                            onChangeText={(v) => { setNom(v); }}
+                            autoCapitalize="words"
+                          />
+                        </View>
+                      </View>
+
+                      <TouchableOpacity
+                        style={[s.primaryBtn, !canStep2 && s.primaryBtnOff]}
+                        onPress={handleRegContinue}
+                        disabled={!canStep2}
+                        activeOpacity={0.85}
+                      >
+                        <LinearGradient
+                          colors={canStep2 ? [C.green, C.greenDark] : ['#B0D8C8', '#9DC9B6']}
+                          start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                          style={s.primaryBtnGrad}
+                        >
+                          <Text style={s.primaryBtnText}>Continuer</Text>
+                          <FontAwesome6 name="arrow-right" size={14} color="#fff" style={{ marginLeft: 8 }} />
+                        </LinearGradient>
+                      </TouchableOpacity>
+                    </>
+                  )}
+
+                  {/* ── ÉTAPE 3 : mot de passe ── */}
+                  {regStep === 3 && (
+                    <>
+                      <View style={s.cardTitleRow}>
                         <View style={[s.cardTitleBadge, { backgroundColor: C.blueGlow }]}>
-                          <Text style={[s.cardTitleBadgeText, { color: C.blue }]}>2 / 2</Text>
+                          <Text style={[s.cardTitleBadgeText, { color: C.blue }]}>3 / 3</Text>
                         </View>
                         <Text style={s.cardTitle}>Sécurisez votre compte</Text>
                       </View>
 
-                      {/* Récapitulatif identité */}
+                      {/* Récapitulatif identité complète */}
                       <View style={s.identitySummary}>
                         <LinearGradient colors={[C.green, C.greenDark]} style={s.identityAvatar}>
                           <Text style={s.identityAvatarText}>{prenom[0]?.toUpperCase() || '?'}</Text>
                         </LinearGradient>
-                        <View>
+                        <View style={{ flex: 1 }}>
                           <Text style={s.identityName}>{prenom} {nom}</Text>
                           <Text style={s.identityContact}>
                             {regType === 'phone' ? `+216 ${phone}` : email}
                           </Text>
                         </View>
                         <TouchableOpacity
-                          onPress={() => { setRegStep(1); setErrors({}); }}
+                          onPress={() => { setRegStep(2); setErrors({}); }}
                           style={s.identityEditBtn}
                           hitSlop={8}
                         >
@@ -498,13 +553,13 @@ export default function LoginScreen() {
                       />
 
                       <TouchableOpacity
-                        style={[s.primaryBtn, !canStep2 && s.primaryBtnOff]}
+                        style={[s.primaryBtn, !canStep3 && s.primaryBtnOff]}
                         onPress={handleRegContinue}
-                        disabled={loading || !canStep2}
+                        disabled={loading || !canStep3}
                         activeOpacity={0.85}
                       >
                         <LinearGradient
-                          colors={canStep2 ? [C.green, C.greenDark] : ['#B0D8C8', '#9DC9B6']}
+                          colors={canStep3 ? [C.green, C.greenDark] : ['#B0D8C8', '#9DC9B6']}
                           start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
                           style={s.primaryBtnGrad}
                         >
@@ -520,6 +575,7 @@ export default function LoginScreen() {
 
                 {/* ── Options sociales (étape 1 uniquement) ── */}
                 {regStep === 1 && (
+
                   <>
                     <View style={s.divRow}>
                       <View style={s.divLine} />

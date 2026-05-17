@@ -83,7 +83,6 @@ const PublicationSchema = new mongoose.Schema(
       value: { type: Number, min: 1, max: 5, required: true },
       _id: false,
     }],
-    expiresAt: { type: Date, default: () => new Date(Date.now() + 24 * 60 * 60 * 1000) },
   },
   {
     timestamps: true,              // createdAt, updatedAt

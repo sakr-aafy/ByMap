@@ -31,8 +31,9 @@ export default function WelcomeNewUser() {
   const route      = useRoute();
   const user       = route.params?.user ?? {};
 
-  const prenom = user.prenom || 'Bienvenu';
-  const points = user.pointsSolde ?? 100;
+  const prenom    = user.prenom || 'Bienvenu';
+  const points    = user.pointsSolde        ?? 100;
+  const freePosts = user.freePostsRemaining ?? 10;
 
   // Animations
   const fadeIn     = useRef(new Animated.Value(0)).current;
@@ -89,23 +90,35 @@ export default function WelcomeNewUser() {
           <Text style={s.name}>{prenom} !</Text>
           <Text style={s.subtitle}>Ton compte ByMap est prêt.{'\n'}Explore ta ville, partage des moments.</Text>
 
-          {/* Carte points */}
-          <Animated.View style={[s.pointsCard, { transform: [{ scale: scalePts }] }]}>
-            <LinearGradient
-              colors={['#FFF7ED', '#FFEDD5']}
-              style={s.pointsGrad}
-            >
-              <Animated.View style={{ transform: [{ rotate: starRotate }] }}>
-                <FontAwesome6 name="star" size={28} color={C.orange} solid />
-              </Animated.View>
-              <View style={s.pointsTextBlock}>
-                <Text style={s.pointsLabel}>Points de départ</Text>
-                <Text style={s.pointsValue}>{points} pts</Text>
+          {/* Cartes avantages : posts gratuits + points */}
+          <Animated.View style={[s.cardsRow, { transform: [{ scale: scalePts }] }]}>
+
+            {/* Posts gratuits — vert */}
+            <LinearGradient colors={['#ECFDF5', '#D1FAE5']} style={s.bonusCard}>
+              <FontAwesome6 name="newspaper" size={24} color={C.green} />
+              <View style={s.bonusTextBlock}>
+                <Text style={[s.bonusLabel, { color: C.green }]}>Posts gratuits</Text>
+                <Text style={[s.bonusValue, { color: C.text }]}>{freePosts} posts</Text>
               </View>
-              <View style={[s.pointsBadge, { backgroundColor: C.orangeGlow }]}>
-                <Text style={[s.pointsBadgeText, { color: C.orange }]}>Offerts</Text>
+              <View style={[s.bonusBadge, { backgroundColor: C.greenGlow }]}>
+                <Text style={[s.bonusBadgeText, { color: C.green }]}>Offerts</Text>
               </View>
             </LinearGradient>
+
+            {/* Points — orange */}
+            <LinearGradient colors={['#FFF7ED', '#FFEDD5']} style={s.bonusCard}>
+              <Animated.View style={{ transform: [{ rotate: starRotate }] }}>
+                <FontAwesome6 name="star" size={24} color={C.orange} solid />
+              </Animated.View>
+              <View style={s.bonusTextBlock}>
+                <Text style={[s.bonusLabel, { color: C.orange }]}>Points de départ</Text>
+                <Text style={[s.bonusValue, { color: C.text }]}>{points} pts</Text>
+              </View>
+              <View style={[s.bonusBadge, { backgroundColor: C.orangeGlow }]}>
+                <Text style={[s.bonusBadgeText, { color: C.orange }]}>Offerts</Text>
+              </View>
+            </LinearGradient>
+
           </Animated.View>
 
           {/* Avantages rapides */}
@@ -191,24 +204,21 @@ const s = StyleSheet.create({
     lineHeight: 20, marginBottom: 28,
   },
 
-  pointsCard: {
-    width: width - 48, borderRadius: 20,
-    overflow: 'hidden', marginBottom: 24,
-    shadowColor: C.orange, shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.18, shadowRadius: 14, elevation: 5,
+  cardsRow: {
+    flexDirection: 'row', gap: 10, width: width - 48, marginBottom: 24,
   },
-  pointsGrad: {
-    flexDirection: 'row', alignItems: 'center', gap: 14,
-    paddingHorizontal: 20, paddingVertical: 18,
-    borderWidth: 1.5, borderColor: 'rgba(249,115,22,0.20)', borderRadius: 20,
+  bonusCard: {
+    flex: 1, borderRadius: 18, overflow: 'hidden',
+    flexDirection: 'column', alignItems: 'flex-start', gap: 6,
+    paddingHorizontal: 14, paddingVertical: 16,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08, shadowRadius: 10, elevation: 4,
   },
-  pointsTextBlock: { flex: 1 },
-  pointsLabel: { fontSize: 12, color: C.orange, fontWeight: '600', marginBottom: 2 },
-  pointsValue: { fontSize: 26, fontWeight: '800', color: C.text },
-  pointsBadge: {
-    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10,
-  },
-  pointsBadgeText: { fontSize: 12, fontWeight: '700' },
+  bonusTextBlock: { width: '100%' },
+  bonusLabel:  { fontSize: 11, fontWeight: '600', marginBottom: 2 },
+  bonusValue:  { fontSize: 22, fontWeight: '800' },
+  bonusBadge:  { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, marginTop: 2 },
+  bonusBadgeText: { fontSize: 11, fontWeight: '700' },
 
   perksRow: {
     flexDirection: 'row', gap: 10, marginBottom: 32,

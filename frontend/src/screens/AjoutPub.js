@@ -447,7 +447,23 @@ export default function AjoutePub() {
       const response = await fetch(`${API_URL}/publications`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: formData });
       const data = await response.json();
       if (!response.ok) { Alert.alert('Erreur', data.message || 'Impossible de publier'); return; }
-      Alert.alert('Publication créée !', 'Votre annonce a bien été enregistrée.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+
+      // ── Alertes post-publication ──────────────────────────────────────────────
+      if (data.warning?.type === 'LAST_FREE_POST') {
+        Alert.alert(
+          '📢 Dernier post gratuit',
+          'Il vous reste 1 post gratuit. Après celui-ci, chaque publication consommera 10 points de votre solde.',
+          [{ text: 'OK', onPress: () => navigation.goBack() }]
+        );
+      } else if (data.warning?.type === 'LOW_POINTS') {
+        Alert.alert(
+          '⚠️ Solde de points faible',
+          `Il vous reste seulement ${data.warning.pointsSolde} point${data.warning.pointsSolde > 1 ? 's' : ''}. Rechargez votre solde pour continuer à publier.`,
+          [{ text: 'OK', onPress: () => navigation.goBack() }]
+        );
+      } else {
+        Alert.alert('Publication créée !', 'Votre annonce a bien été enregistrée.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+      }
     } catch { Alert.alert('Erreur réseau', 'Vérifiez votre connexion et réessayez.'); }
     finally { setLoading(false); }
   };

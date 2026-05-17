@@ -66,6 +66,78 @@ exports.deleteUser = async (req, res) => {
   }
 };
 
+// ─── PUT /api/admin/users/:id/add-points ─────────────────────────────────────
+exports.addPoints = async (req, res) => {
+  try {
+    const points    = parseInt(req.body.points    ?? 0, 10);
+    const freePosts = parseInt(req.body.freePosts ?? 0, 10);
+
+    if (points < 0 || freePosts < 0)
+      return res.status(400).json({ message: 'Les valeurs doivent être positives' });
+
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: 'Utilisateur introuvable' });
+
+    if (points    > 0) user.pointsSolde        = (user.pointsSolde        || 0) + points;
+    if (freePosts > 0) user.freePostsRemaining = (user.freePostsRemaining || 0) + freePosts;
+
+    await user.save({ validateBeforeSave: false });
+
+    // ── Push notification à l'utilisateur crédité ────────────────────────────
+    if (user.pushToken) {
+      const { sendPush } = require('../services/push.service');
+
+      // Construire le titre et le corps selon ce qui a été crédité
+      const parts = [];
+      if (points    > 0) parts.push(`+${points} points`);
+      if (freePosts > 0) parts.push(`+${freePosts} post${freePosts > 1 ? 's' : ''} gratuit${freePosts > 1 ? 's' : ''}`);
+
+      const title = '🎁 Crédit reçu !';
+      const body  = `${parts.join(' et ')} ont été ajoutés à votre compte.\n🪙 Solde : ${user.pointsSolde} pts  ·  📰 ${user.freePostsRemaining} posts gratuits`;
+
+      sendPush(
+        user.pushToken,
+        title,
+        body,
+        { screen: 'Profile' }
+      ).catch(() => {}); // fire-and-forget
+    }
+
+    res.json({ message: 'Solde mis à jour', user: user.toPublic() });
+  } catch (err) {
+    res.status(500).json({ message: 'Erreur serveur' });
+  }
+};
+
+// ─── GET /api/admin/notifications ────────────────────────────────────────────
+// Retourne les dernières créations de comptes (50 max)
+exports.getNotifications = async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit ?? 50, 10), 100);
+    const users = await User.find()
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .select('nom prenom email phone createdAt avatarUrl role pointsSolde freePostsRemaining');
+
+    const notifications = users.map(u => ({
+      _id:       u._id,
+      type:      'new_account',
+      nom:       u.nom,
+      prenom:    u.prenom,
+      email:     u.email || u.phone || '',
+      avatarUrl: u.avatarUrl || '',
+      role:      u.role,
+      pointsSolde:        u.pointsSolde        ?? 100,
+      freePostsRemaining: u.freePostsRemaining ?? 10,
+      createdAt: u.createdAt,
+    }));
+
+    res.json({ notifications, total: notifications.length });
+  } catch (err) {
+    res.status(500).json({ message: 'Erreur serveur' });
+  }
+};
+
 // ─── GET /api/admin/stats ─────────────────────────────────────────────────────
 exports.getStats = async (req, res) => {
   try {

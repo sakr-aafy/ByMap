@@ -116,7 +116,9 @@
     "renew24": "تجديد (+24 ساعة)",
     "tabMap": "الخريطة",
     "share": "مشاركة",
-    "qrShareError": "تعذر مشاركة رمز QR"
+    "qrShareError": "تعذر مشاركة رمز QR",
+    "adDetailTitle": "تفاصيل الإعلان",
+    "scans": "المسح"
   },
   "map": {
     "searchPlaceholder": "ابحث عن مكان…",

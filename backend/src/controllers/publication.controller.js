@@ -5,6 +5,41 @@ const Favorite                 = require('../models/Favorite.model');
 const { uploadToCloud, deleteFromCloud } = require('../middleware/upload.middleware');
 const { sendPush }             = require('../services/push.service');
 
+// ─── Helper : notifier utilisateur + admin si solde ≤ 20 pts ─────────────────
+const LOW_POINTS_THRESHOLD = 20;
+
+const notifyLowBalance = async (author) => {
+  const solde = author.pointsSolde ?? 0;
+  if (solde > LOW_POINTS_THRESHOLD) return; // pas d'alerte nécessaire
+
+  const prenom = author.prenom || author.nom || 'Utilisateur';
+  const userName = `${author.prenom || ''} ${author.nom || ''}`.trim() || author.email || 'Utilisateur';
+
+  // ── Push à l'utilisateur ──────────────────────────────────────────────────
+  if (author.pushToken) {
+    sendPush(
+      [author.pushToken],
+      '⚠️ Solde de points faible',
+      `Bonjour ${prenom}, il vous reste seulement ${solde} point${solde > 1 ? 's' : ''}.\nRechargez votre solde pour continuer à publier.`,
+      { screen: 'Profile' }
+    ).catch(() => {});
+  }
+
+  // ── Push à l'admin ────────────────────────────────────────────────────────
+  try {
+    const admins = await User.find({ role: 'admin', pushToken: { $ne: '' } }).select('pushToken');
+    const adminTokens = admins.map(a => a.pushToken).filter(Boolean);
+    if (adminTokens.length) {
+      sendPush(
+        adminTokens,
+        '📉 Solde faible — utilisateur',
+        `${userName} n'a plus que ${solde} point${solde > 1 ? 's' : ''}. Pensez à créditer son compte.`,
+        { screen: 'AdminNotifications' }
+      ).catch(() => {});
+    }
+  } catch {}
+};
+
 // ─── Helper : construire l'objet localisation depuis req.body ─────────────────
 const parseLocalisation = (body, prefix = '') => ({
   ville:       body[`${prefix}ville`]       || '',
@@ -24,22 +59,32 @@ exports.create = async (req, res) => {
     if (!['local', 'duo'].includes(mode))
       return res.status(400).json({ message: 'Mode invalide (local ou duo)' });
 
-    // ── Vérifier le solde de points (10 points requis par publication) ────────
+    // ── Vérifier posts gratuits ou solde de points ────────────────────────────
     const author = await User.findById(req.user.id);
     if (!author) return res.status(404).json({ message: 'Utilisateur introuvable' });
 
-    const solde = typeof author.pointsSolde === 'number' ? author.pointsSolde : 100;
-    if (solde < 10) {
-      return res.status(402).json({
-        message: 'Solde insuffisant. Achetez des points pour publier (10 points par annonce).',
-        code: 'INSUFFICIENT_POINTS',
-        pointsSolde: solde,
-      });
-    }
+    const freePosts = typeof author.freePostsRemaining === 'number' ? author.freePostsRemaining : 0;
+    const solde     = typeof author.pointsSolde        === 'number' ? author.pointsSolde        : 0;
 
-    // Déduire 10 points
-    author.pointsSolde = solde - 10;
+    if (freePosts > 0) {
+      // Consommer un post gratuit
+      author.freePostsRemaining = freePosts - 1;
+    } else {
+      // Pas de posts gratuits → déduire 10 points
+      if (solde < 10) {
+        return res.status(402).json({
+          message: 'Solde insuffisant. Achetez des points pour publier (10 points par annonce).',
+          code: 'INSUFFICIENT_POINTS',
+          pointsSolde: solde,
+          freePostsRemaining: 0,
+        });
+      }
+      author.pointsSolde = solde - 10;
+    }
     await author.save({ validateBeforeSave: false });
+
+    // ── Notifications solde faible (fire-and-forget) ──────────────────────────
+    if (freePosts === 0) notifyLowBalance(author).catch(() => {});
 
     // ── Upload des médias envoyés ─────────────────────────────────────────────
     const medias = [];
@@ -96,9 +141,50 @@ exports.create = async (req, res) => {
       } catch {}
     })();
 
-    res.status(201).json({ message: 'Publication créée', publication: pub });
+    res.status(201).json({ message: 'Publication créée', publication: pub, ...(warning && { warning }) });
   } catch (err) {
     console.error('[CREATE PUB]', err);
+    res.status(500).json({ message: 'Erreur serveur', error: err.message });
+  }
+};
+
+// ─── GET /api/publications/by-zone ───────────────────────────────────────────
+// Retourne tous les posts actifs groupés par zone, avec auteur populé
+exports.getByZone = async (_req, res) => {
+  try {
+    const pubs = await Publication.find({ statut: 'active' })
+      .populate('auteur', 'nom prenom avatarUrl')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const zoneMap = {};
+
+    for (const p of pubs) {
+      const zoneName =
+        p.mode === 'local'
+          ? (p.localisation?.ville || p.localisation?.delegation || p.localisation?.gouvernorat || 'Autre')
+          : (p.localisationDebut?.ville || p.localisationDebut?.delegation || p.localisationDebut?.gouvernorat || 'Autre');
+
+      if (!zoneMap[zoneName]) {
+        zoneMap[zoneName] = {
+          name:       zoneName,
+          gouvernorat: p.mode === 'local' ? (p.localisation?.gouvernorat || '') : (p.localisationDebut?.gouvernorat || ''),
+          local: [],
+          duo:   [],
+        };
+      }
+
+      if (p.mode === 'local') zoneMap[zoneName].local.push(p);
+      else                    zoneMap[zoneName].duo.push(p);
+    }
+
+    // Trier par nombre total de publications décroissant
+    const zones = Object.values(zoneMap).sort(
+      (a, b) => (b.local.length + b.duo.length) - (a.local.length + a.duo.length)
+    );
+
+    res.json({ zones });
+  } catch (err) {
     res.status(500).json({ message: 'Erreur serveur', error: err.message });
   }
 };
@@ -107,7 +193,7 @@ exports.create = async (req, res) => {
 // Retourne les zones groupées avec comptages { zones: [{name, gouvernorat, local, duo}] }
 exports.getZoneDots = async (_req, res) => {
   try {
-    const pubs = await Publication.find({ statut: 'active', expiresAt: { $gt: new Date() } })
+    const pubs = await Publication.find({ statut: 'active' })
       .select('mode localisation localisationDebut localisationFin')
       .lean();
 
@@ -143,21 +229,14 @@ exports.getAll = async (req, res) => {
   try {
     const {
       page  = 1,
-      limit = 15,
+      limit = 200,
       mode,
       ville,
       auteur,
       search,
     } = req.query;
 
-    // Auto-archive posts whose time has expired
-    const now = new Date();
-    await Publication.updateMany(
-      { statut: 'active', expiresAt: { $lte: now } },
-      { $set: { statut: 'archivee' } }
-    );
-
-    const filter = { statut: 'active', expiresAt: { $gt: now } };
+    const filter = { statut: 'active' };
     if (mode)   filter.mode   = mode;
     if (auteur) filter.auteur = auteur;
     if (search) filter.description = { $regex: search, $options: 'i' };
@@ -196,8 +275,7 @@ exports.getOne = async (req, res) => {
     const pub = await Publication.findById(req.params.id)
       .populate('auteur', 'nom prenom avatarUrl');
 
-    const expired = pub?.expiresAt && pub.expiresAt < new Date();
-    if (!pub || pub.statut === 'supprimee' || pub.statut === 'archivee' || expired)
+    if (!pub || pub.statut === 'supprimee' || pub.statut === 'archivee')
       return res.status(404).json({ message: 'Publication introuvable' });
 
     // Incrémenter les vues
@@ -264,6 +342,59 @@ exports.remove = async (req, res) => {
   }
 };
 
+// ─── POST /api/publications/:id/renew ────────────────────────────────────────
+// Renouvelle (booste) une publication : consomme 1 post gratuit ou 10 points
+exports.renew = async (req, res) => {
+  try {
+    const pub = await Publication.findById(req.params.id);
+    if (!pub) return res.status(404).json({ message: 'Publication introuvable' });
+
+    if (pub.auteur.toString() !== req.user.id.toString() && req.user.role !== 'admin')
+      return res.status(403).json({ message: 'Non autorisé' });
+
+    const author     = await User.findById(req.user.id);
+    if (!author) return res.status(404).json({ message: 'Utilisateur introuvable' });
+
+    const freePosts  = typeof author.freePostsRemaining === 'number' ? author.freePostsRemaining : 0;
+    const solde      = typeof author.pointsSolde        === 'number' ? author.pointsSolde        : 0;
+
+    let usedFreePost = false;
+    if (freePosts > 0) {
+      author.freePostsRemaining = freePosts - 1;
+      usedFreePost = true;
+    } else {
+      if (solde < 10) {
+        return res.status(402).json({
+          message: 'Solde insuffisant pour renouveler (10 points requis).',
+          code: 'INSUFFICIENT_POINTS',
+          pointsSolde: solde,
+          freePostsRemaining: 0,
+        });
+      }
+      author.pointsSolde = solde - 10;
+    }
+    await author.save({ validateBeforeSave: false });
+
+    // ── Notifications solde faible (fire-and-forget) ──────────────────────────
+    if (!usedFreePost) notifyLowBalance(author).catch(() => {});
+
+    // Remonter le post en tête (mise à jour createdAt)
+    pub.createdAt = new Date();
+    pub.statut    = 'active';
+    await pub.save({ validateBeforeSave: false });
+
+    res.json({
+      message: 'Publication renouvelée',
+      usedFreePost,
+      pointsSolde:        author.pointsSolde,
+      freePostsRemaining: author.freePostsRemaining,
+    });
+  } catch (err) {
+    console.error('[RENEW PUB]', err);
+    res.status(500).json({ message: 'Erreur serveur' });
+  }
+};
+
 // ─── POST /api/publications/:id/like ─────────────────────────────────────────
 exports.toggleLike = async (req, res) => {
   try {
@@ -282,31 +413,6 @@ exports.toggleLike = async (req, res) => {
     await pub.save({ validateBeforeSave: false });
     res.json({ liked: index === -1, nbLikes: pub.likes.length });
   } catch (err) {
-    res.status(500).json({ message: 'Erreur serveur' });
-  }
-};
-
-// ─── POST /api/publications/:id/renew ────────────────────────────────────────
-// Renouvelle une publication de 24h
-exports.renew = async (req, res) => {
-  try {
-    const pub = await Publication.findById(req.params.id);
-    if (!pub) return res.status(404).json({ message: 'Publication introuvable' });
-
-    if (pub.auteur.toString() !== req.user.id.toString() && req.user.role !== 'admin')
-      return res.status(403).json({ message: 'Non autorisé' });
-
-    const now = new Date();
-    // Prolonge depuis maintenant ou depuis l'expiry actuel si encore valide
-    const currentExpiry = pub.expiresAt ? new Date(pub.expiresAt) : now;
-    const base = currentExpiry > now ? currentExpiry : now;
-    pub.expiresAt = new Date(base.getTime() + 24 * 60 * 60 * 1000);
-    pub.statut = 'active';
-    await pub.save({ validateBeforeSave: false });
-
-    res.json({ message: 'Publication renouvelée', expiresAt: pub.expiresAt });
-  } catch (err) {
-    console.error('[RENEW PUB]', err);
     res.status(500).json({ message: 'Erreur serveur' });
   }
 };

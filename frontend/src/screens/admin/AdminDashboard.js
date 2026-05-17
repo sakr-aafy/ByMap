@@ -659,12 +659,17 @@ function ZonesView({ onBack, onAdd, onImport, onExport, zones, loading, onDelete
 
 // ── UsersListView ─────────────────────────────────────────────────────────────
 function UsersListView({ onBack, onSelectUser }) {
-  const [users,    setUsers]    = useState([]);
-  const [loading,  setLoading]  = useState(true);
-  const [search,   setSearch]   = useState('');
-  const [page,     setPage]     = useState(1);
-  const [hasMore,  setHasMore]  = useState(true);
-  const [loadMore, setLoadMore] = useState(false);
+  const [users,          setUsers]          = useState([]);
+  const [loading,        setLoading]        = useState(true);
+  const [search,         setSearch]         = useState('');
+  const [page,           setPage]           = useState(1);
+  const [hasMore,        setHasMore]        = useState(true);
+  const [loadMore,       setLoadMore]       = useState(false);
+  const [addModal,       setAddModal]       = useState(false);
+  const [modalUser,      setModalUser]      = useState(null);
+  const [pointsToAdd,    setPointsToAdd]    = useState('');
+  const [freePostsToAdd, setFreePostsToAdd] = useState('');
+  const [adding,         setAdding]         = useState(false);
 
   const fetchUsers = useCallback(async (p = 1, q = search, reset = false) => {
     try {
@@ -703,6 +708,39 @@ function UsersListView({ onBack, onSelectUser }) {
     ]);
   };
 
+  const openAddModal = (u) => {
+    setModalUser(u);
+    setPointsToAdd('');
+    setFreePostsToAdd('');
+    setAddModal(true);
+  };
+
+  const handleAddPoints = async () => {
+    const pts  = parseInt(pointsToAdd    || '0', 10);
+    const free = parseInt(freePostsToAdd || '0', 10);
+    if (pts < 0 || free < 0 || isNaN(pts) || isNaN(free)) {
+      Alert.alert('Erreur', 'Entrez des valeurs positives.'); return;
+    }
+    if (pts === 0 && free === 0) {
+      Alert.alert('Erreur', 'Entrez au moins une valeur.'); return;
+    }
+    setAdding(true);
+    try {
+      const token = await AsyncStorage.getItem('accessToken');
+      const res   = await fetch(`${API_URL}/admin/users/${modalUser._id}/add-points`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ points: pts, freePosts: free }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Erreur');
+      setUsers(prev => prev.map(u => u._id === modalUser._id ? { ...u, pointsSolde: data.user.pointsSolde, freePostsRemaining: data.user.freePostsRemaining } : u));
+      setAddModal(false);
+      Alert.alert('Succès', `Solde mis à jour :\n🪙 ${data.user.pointsSolde} pts  ·  📰 ${data.user.freePostsRemaining} posts gratuits`);
+    } catch (e) { Alert.alert('Erreur', e.message); }
+    finally { setAdding(false); }
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <View style={styles.subHeader}>
@@ -717,6 +755,83 @@ function UsersListView({ onBack, onSelectUser }) {
           <Text style={[styles.countBadgeText, { color: C.blue }]}>{users.length}</Text>
         </View>
       </View>
+
+      {/* ── Modal ajout points / posts gratuits ── */}
+      <Modal visible={addModal} transparent animationType="fade" onRequestClose={() => setAddModal(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.40)' }}>
+          <View style={styles.addPointsSheet}>
+
+            <View style={styles.addPointsHeader}>
+              <LinearGradient colors={[C.green, C.greenDark]} style={styles.addPointsIconBox}>
+                <FontAwesome6 name="circle-plus" size={18} color="#fff" />
+              </LinearGradient>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.addPointsTitle}>Créditer un compte</Text>
+                <Text style={styles.addPointsSub} numberOfLines={1}>
+                  {modalUser ? [modalUser.prenom, modalUser.nom].filter(Boolean).join(' ') || modalUser.email : ''}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setAddModal(false)} hitSlop={10}>
+                <FontAwesome6 name="xmark" size={16} color={C.textDim} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Solde actuel */}
+            {modalUser && (
+              <View style={styles.addPointsCurrent}>
+                <View style={styles.addPointsCurrentItem}>
+                  <FontAwesome6 name="coins" size={13} color={C.orange} />
+                  <Text style={[styles.addPointsCurrentVal, { color: C.orange }]}>{modalUser.pointsSolde ?? 0} pts actuels</Text>
+                </View>
+                <View style={styles.addPointsCurrentSep} />
+                <View style={styles.addPointsCurrentItem}>
+                  <FontAwesome6 name="newspaper" size={13} color={C.green} />
+                  <Text style={[styles.addPointsCurrentVal, { color: C.green }]}>{modalUser.freePostsRemaining ?? 0} posts gratuits</Text>
+                </View>
+              </View>
+            )}
+
+            <Text style={styles.addPointsFieldLabel}>Points à ajouter</Text>
+            <View style={styles.addPointsInputRow}>
+              <FontAwesome6 name="coins" size={15} color={C.orange} style={{ marginRight: 8 }} />
+              <TextInput
+                style={styles.addPointsInput}
+                keyboardType="numeric"
+                placeholder="ex: 100"
+                placeholderTextColor={C.textFaint}
+                value={pointsToAdd}
+                onChangeText={setPointsToAdd}
+              />
+            </View>
+
+            <Text style={styles.addPointsFieldLabel}>Posts gratuits à ajouter</Text>
+            <View style={styles.addPointsInputRow}>
+              <FontAwesome6 name="newspaper" size={15} color={C.green} style={{ marginRight: 8 }} />
+              <TextInput
+                style={styles.addPointsInput}
+                keyboardType="numeric"
+                placeholder="ex: 5"
+                placeholderTextColor={C.textFaint}
+                value={freePostsToAdd}
+                onChangeText={setFreePostsToAdd}
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[styles.addPointsConfirmBtn, adding && { opacity: 0.6 }]}
+              onPress={handleAddPoints}
+              activeOpacity={0.82}
+              disabled={adding}
+            >
+              {adding
+                ? <ActivityIndicator color="#fff" />
+                : <><FontAwesome6 name="check" size={14} color="#fff" /><Text style={styles.addPointsConfirmText}>Confirmer</Text></>
+              }
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       <View style={styles.searchBox}>
         <FontAwesome6 name="magnifying-glass" size={15} color={C.textFaint} />
@@ -748,9 +863,11 @@ function UsersListView({ onBack, onSelectUser }) {
             </View>
           )}
           {users.map((u) => {
-            const name   = [u.prenom, u.nom].filter(Boolean).join(' ') || '—';
+            const name    = [u.prenom, u.nom].filter(Boolean).join(' ') || '—';
             const initial = name[0]?.toUpperCase() || '?';
-            const active = u.isActive !== false;
+            const active  = u.isActive !== false;
+            const pts     = u.pointsSolde        ?? 0;
+            const free    = u.freePostsRemaining ?? 0;
             return (
               <TouchableOpacity key={u._id} style={styles.userCard} onPress={() => onSelectUser(u)} activeOpacity={0.8}>
                 <LinearGradient
@@ -759,25 +876,42 @@ function UsersListView({ onBack, onSelectUser }) {
                 >
                   <Text style={styles.userAvatarText}>{initial}</Text>
                 </LinearGradient>
+
                 <View style={styles.userInfo}>
                   <Text style={styles.userName} numberOfLines={1}>{name}</Text>
                   <Text style={styles.userEmail} numberOfLines={1}>{u.email || u.phone || '—'}</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                    <FontAwesome6 name="star" size={10} color={C.orange} />
-                    <Text style={{ fontSize: 12, fontWeight: '700', color: C.orange }}>{u.pointsSolde ?? 100} pts</Text>
+
+                  {/* Soldes : points + posts gratuits */}
+                  <View style={styles.userSoldesRow}>
+                    <FontAwesome6 name="coins" size={10} color={C.orange} />
+                    <Text style={[styles.userSoldeText, { color: pts <= 10 ? C.red : C.orange }]}>{pts} pts</Text>
+                    <View style={styles.userSoldeSep} />
+                    <FontAwesome6 name="newspaper" size={10} color={C.green} />
+                    <Text style={[styles.userSoldeText, { color: free === 0 ? C.red : C.green }]}>{free} gratuits</Text>
                   </View>
+
                   <View style={[styles.userBadge, { backgroundColor: active ? C.greenGlow : C.redGlow }]}>
                     <View style={[styles.userBadgeDot, { backgroundColor: active ? C.green : C.red }]} />
                     <Text style={[styles.userBadgeText, { color: active ? C.green : C.red }]}>{active ? 'Actif' : 'Inactif'}</Text>
                   </View>
                 </View>
+
                 <View style={styles.userActions}>
+                  {/* Bouton + créditer */}
+                  <TouchableOpacity
+                    style={[styles.actionIconBtn, { backgroundColor: C.greenGlow, borderColor: C.green }]}
+                    onPress={(e) => { e.stopPropagation?.(); openAddModal(u); }} activeOpacity={0.75}
+                  >
+                    <FontAwesome6 name="plus" size={13} color={C.green} />
+                  </TouchableOpacity>
+                  {/* Bouton activer/désactiver */}
                   <TouchableOpacity
                     style={[styles.actionIconBtn, { backgroundColor: active ? C.orangeGlow : C.greenGlow, borderColor: active ? C.orange : C.green }]}
                     onPress={(e) => { e.stopPropagation?.(); toggleActive(u); }} activeOpacity={0.75}
                   >
                     <FontAwesome6 name={active ? 'lock' : 'lock-open'} size={13} color={active ? C.orange : C.green} />
                   </TouchableOpacity>
+                  {/* Bouton supprimer */}
                   <TouchableOpacity
                     style={[styles.actionIconBtn, { backgroundColor: C.redGlow, borderColor: C.red }]}
                     onPress={(e) => { e.stopPropagation?.(); deleteUser(u); }} activeOpacity={0.75}
@@ -1201,10 +1335,27 @@ export default function AdminDashboard() {
         <LinearGradient colors={[C.green, C.greenDark]} style={styles.headerLogo}>
           <FontAwesome6 name="shield-halved" size={16} color="#FFFFFF" />
         </LinearGradient>
-        <View>
+        <View style={{ flex: 1 }}>
           <Text style={styles.headerTitle}>Admin Panel</Text>
           <Text style={styles.headerSub}>ByMap — Tableau de bord</Text>
         </View>
+        {/* Notifications */}
+        <TouchableOpacity
+          style={styles.headerIconBtn}
+          onPress={() => navigation.navigate('AdminNotifications')}
+          activeOpacity={0.75}
+        >
+          <FontAwesome6 name="bell" size={17} color={C.green} />
+          <View style={styles.notifBadge} />
+        </TouchableOpacity>
+        {/* Déconnexion */}
+        <TouchableOpacity
+          style={[styles.headerIconBtn, { backgroundColor: C.redGlow, borderColor: 'rgba(239,68,68,0.25)' }]}
+          onPress={handleLogout}
+          activeOpacity={0.75}
+        >
+          <FontAwesome6 name="right-from-bracket" size={16} color={C.red} />
+        </TouchableOpacity>
       </View>
 
       {/* ── Contenu par onglet ── */}
@@ -1237,9 +1388,21 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.06, shadowRadius: 8, elevation: 4,
   },
-  headerLogo: { width: 38, height: 38, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { fontSize: 17, fontWeight: '800', color: C.text, letterSpacing: -0.3 },
-  headerSub:   { fontSize: 11, color: C.textFaint, marginTop: 1 },
+  headerLogo:    { width: 38, height: 38, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  headerTitle:   { fontSize: 17, fontWeight: '800', color: C.text, letterSpacing: -0.3 },
+  headerSub:     { fontSize: 11, color: C.textFaint, marginTop: 1 },
+  headerIconBtn: {
+    width: 38, height: 38, borderRadius: 12,
+    backgroundColor: C.greenGlow, borderWidth: 1, borderColor: 'rgba(45,189,126,0.25)',
+    justifyContent: 'center', alignItems: 'center',
+    position: 'relative',
+  },
+  notifBadge: {
+    position: 'absolute', top: 7, right: 7,
+    width: 8, height: 8, borderRadius: 4,
+    backgroundColor: C.red,
+    borderWidth: 1.5, borderColor: C.white,
+  },
   logoutBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: C.redGlow, paddingHorizontal: 12, paddingVertical: 8,
@@ -1362,7 +1525,32 @@ const styles = StyleSheet.create({
   userBadgeDot:   { width: 6, height: 6, borderRadius: 3 },
   userBadgeText:  { fontSize: 11, fontWeight: '700' },
   userActions:    { gap: 6 },
-  actionIconBtn:  { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5 },
+  actionIconBtn:  { width: 34, height: 34, borderRadius: 10, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5 },
+
+  userSoldesRow:  { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
+  userSoldeText:  { fontSize: 11, fontWeight: '700' },
+  userSoldeSep:   { width: 1, height: 10, backgroundColor: C.border, marginHorizontal: 2 },
+
+  // Modal ajout points
+  addPointsSheet: {
+    width: '88%', backgroundColor: C.white, borderRadius: 22,
+    padding: 20, gap: 10,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15, shadowRadius: 24, elevation: 16,
+  },
+  addPointsHeader:      { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 4 },
+  addPointsIconBox:     { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  addPointsTitle:       { fontSize: 15, fontWeight: '800', color: C.text },
+  addPointsSub:         { fontSize: 12, color: C.textFaint, marginTop: 1 },
+  addPointsCurrent:     { flexDirection: 'row', alignItems: 'center', backgroundColor: C.inputBg, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, gap: 6, marginBottom: 4 },
+  addPointsCurrentItem: { flexDirection: 'row', alignItems: 'center', gap: 5, flex: 1 },
+  addPointsCurrentVal:  { fontSize: 12, fontWeight: '700' },
+  addPointsCurrentSep:  { width: 1, height: 16, backgroundColor: C.border },
+  addPointsFieldLabel:  { fontSize: 12, fontWeight: '700', color: C.textDim, marginTop: 4 },
+  addPointsInputRow:    { flexDirection: 'row', alignItems: 'center', backgroundColor: C.inputBg, borderRadius: 12, borderWidth: 1.5, borderColor: C.border, paddingHorizontal: 12, paddingVertical: 2 },
+  addPointsInput:       { flex: 1, fontSize: 15, fontWeight: '700', color: C.text, paddingVertical: 10 },
+  addPointsConfirmBtn:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.green, borderRadius: 14, paddingVertical: 14, marginTop: 6 },
+  addPointsConfirmText: { fontSize: 15, fontWeight: '800', color: '#fff' },
 
   // Post card
   postCard: {

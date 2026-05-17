@@ -46,18 +46,6 @@ const timeAgo = (dateStr) => {
   return `${Math.floor(diff / 86400)}j`;
 };
 
-// Temps restant avant expiration
-const timeLeft = (expiresAt, now) => {
-  if (!expiresAt) return null;
-  const diff = new Date(expiresAt).getTime() - now;
-  if (diff <= 0) return { label: 'Expiré', urgent: true };
-  const h = Math.floor(diff / 3600000);
-  const m = Math.floor((diff % 3600000) / 60000);
-  if (h >= 24) return { label: `${Math.floor(h / 24)}j restants`, urgent: false };
-  if (h > 0)   return { label: `${h}h ${m}min`, urgent: h < 3 };
-  return { label: `${m}min`, urgent: true };
-};
-
 // ── Couleurs — thème clair mint ───────────────────────────────────────────────
 const C = {
   local:       '#2DBD7E',
@@ -97,7 +85,7 @@ const TAB_ITEMS = [
 // ─────────────────────────────────────────────────────────────────────────────
 // Composant PubCard — carte LOCAL (vert) ou DUO (bleu)
 // ─────────────────────────────────────────────────────────────────────────────
-const PubCard = ({ item, onPress, onContact, currentUser, now, onRenew }) => {
+const PubCard = ({ item, onPress, onContact, currentUser }) => {
   const { t }      = useTranslation();
   const scaleAnim  = useRef(new Animated.Value(1)).current;
   const heartScale = useRef(new Animated.Value(1)).current;
@@ -142,7 +130,6 @@ const PubCard = ({ item, onPress, onContact, currentUser, now, onRenew }) => {
   const accent       = isLocal ? C.local : C.duo;
   const accentGlow   = isLocal ? C.localGlow : C.duoGlow;
 
-  const expiry       = timeLeft(item.expiresAt, now);
   const isAuthor     = currentUser && item.auteur?._id?.toString() === currentUser._id?.toString();
 
   const authorName = [item.auteur?.prenom, item.auteur?.nom].filter(Boolean).join(' ') || 'Anonyme';
@@ -181,17 +168,9 @@ const PubCard = ({ item, onPress, onContact, currentUser, now, onRenew }) => {
               <Text style={styles.cardTime}>{timeAgo(item.createdAt)}</Text>
             </View>
           </View>
-          <View style={{ alignItems: 'flex-end', gap: 4 }}>
-            <View style={[styles.modeBadge, { backgroundColor: accentGlow, borderColor: accent }]}>
-              <View style={[styles.modeDot, { backgroundColor: accent }]} />
-              <Text style={[styles.modeText, { color: accent }]}>{isLocal ? t('common.local') : t('common.duo')}</Text>
-            </View>
-            {expiry && (
-              <View style={[styles.expiryBadge, { backgroundColor: expiry.urgent ? 'rgba(239,68,68,0.10)' : 'rgba(107,114,128,0.08)' }]}>
-                <FontAwesome6 name="clock" size={9} color={expiry.urgent ? C.red : '#9CA3AF'} />
-                <Text style={[styles.expiryText, { color: expiry.urgent ? C.red : '#9CA3AF' }]}>{expiry.label}</Text>
-              </View>
-            )}
+          <View style={[styles.modeBadge, { backgroundColor: accentGlow, borderColor: accent }]}>
+            <View style={[styles.modeDot, { backgroundColor: accent }]} />
+            <Text style={[styles.modeText, { color: accent }]}>{isLocal ? t('common.local') : t('common.duo')}</Text>
           </View>
         </View>
 
@@ -292,14 +271,7 @@ export default function LocalScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasNewPost,  setHasNewPost]  = useState(false);
   const [isFavorite,  setIsFavorite]  = useState(false);
-  const [now,         setNow]         = useState(Date.now());
   const prevPubsCount = useRef(0);
-
-  // Tick every minute to refresh countdowns and drop expired cards
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 60_000);
-    return () => clearInterval(id);
-  }, []);
 
   // ── Animation FAB ──────────────────────────────────────────────────────────
   const fabPulse    = useRef(new Animated.Value(1)).current;
@@ -366,7 +338,7 @@ export default function LocalScreen() {
 
       const params = new URLSearchParams({
         page:  pageNum,
-        limit: 10,
+        limit: 200,
         ...(modeFilter !== 'all' && { mode: modeFilter }),
         ...(zoneName             && { ville: zoneName }),
         ...(search.trim()        && { search: search.trim() }),
@@ -485,36 +457,12 @@ export default function LocalScreen() {
     });
   };
 
-  // ── Renouveler un poste (+24h) ────────────────────────────────────────────
-  const handleRenew = async (item) => {
-    try {
-      const token = await AsyncStorage.getItem('accessToken');
-      const res   = await fetch(`${API_URL}/publications/${item._id}/renew`, {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setPubs(prev => prev.map(p =>
-          p._id === item._id
-            ? { ...p, expiresAt: data.expiresAt, statut: 'active' }
-            : p
-        ));
-      } else {
-        Alert.alert('Erreur', 'Impossible de renouveler.');
-      }
-    } catch {
-      Alert.alert('Erreur', 'Impossible de renouveler.');
-    }
-  };
-
   // ── Compteurs local / duo ─────────────────────────────────────────────────
   const localCount = publications.filter(p => p.mode === 'local').length;
   const duoCount   = publications.filter(p => p.mode === 'duo').length;
 
-  // ── Filtrer côté client : expiré + recherche texte ───────────────────────
+  // ── Filtrer côté client : recherche texte ────────────────────────────────
   const filtered = publications.filter(p => {
-    if (p.expiresAt && new Date(p.expiresAt).getTime() <= now) return false;
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     return (
@@ -672,8 +620,6 @@ export default function LocalScreen() {
               <PubCard
                 item={item}
                 currentUser={currentUser}
-                now={now}
-                onRenew={() => handleRenew(item)}
                 onPress={() => navigation.navigate('PublicationDetail', { publication: item })}
                 onContact={() => {
                   if (!currentUser) navigation.navigate('Login');

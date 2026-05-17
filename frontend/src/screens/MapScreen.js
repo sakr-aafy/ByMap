@@ -455,16 +455,18 @@ window.addZoneDots = function(dots) {
   dots.forEach(function(d) {
     var pulse = L.divIcon({
       className: '',
-      html: '<div style="width:4px;height:4px;border-radius:50%;background: #00fa3e;border:1.5px solid #00fa3e;box-shadow:0 0 0 3px rgb(1, 92, 24);cursor:pointer;transition:transform 0.15s;"></div>',
-      iconSize: [10, 10],
-      iconAnchor: [5, 5],
+      html: '<div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;">' +
+            '<div style="width:10px;height:10px;border-radius:50%;background:#00fa3e;border:2.5px solid #00c42e;box-shadow:0 0 0 6px rgba(0,250,62,0.22),0 2px 8px rgba(0,0,0,0.18);cursor:pointer;transition:transform 0.15s;"></div>' +
+            '</div>',
+      iconSize: [36, 36],
+      iconAnchor: [18, 18],
     });
     var m = L.marker([d.lat, d.lng], { icon: pulse });
     m.bindTooltip(
       '<b>' + d.name + '</b><br/>' +
       '<span style="color:#34C759">● ' + d.local + ' local</span>  ' +
       '<span style="color:#1E90FF">● ' + d.duo + ' duo</span>',
-      { direction: 'top', offset: [0, -10] }
+      { direction: 'top', offset: [0, -18] }
     );
     // ── CLIC sur point vert → snap Radio Garden ──
     m.on('click', function() {
