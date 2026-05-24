@@ -2,6 +2,10 @@
 const jwt  = require('jsonwebtoken');
 const https = require('https');
 const User = require('../models/User.model');
+const Otp  = require('../models/Otp.model');
+const { sendOtpEmail } = require('../utils/email');
+
+const generateOtp = () => String(Math.floor(100000 + Math.random() * 900000));
 
 // ─── Helper : fetch HTTPS simple ─────────────────────────────────────────────
 const fetchJSON = (url) => new Promise((resolve, reject) => {
@@ -208,5 +212,105 @@ exports.socialLogin = async (req, res) => {
   } catch (err) {
     console.error('[SOCIAL LOGIN]', err);
     res.status(500).json({ message: 'Erreur serveur', error: err.message });
+  }
+};
+
+// ─── POST /api/auth/send-register-otp ────────────────────────────────────────
+exports.sendRegisterOtp = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ message: 'Email requis' });
+
+    const exists = await User.findOne({ email: email.toLowerCase() });
+    if (exists) return res.status(409).json({ message: 'Email déjà utilisé' });
+
+    const code      = generateOtp();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    await Otp.deleteMany({ email: email.toLowerCase(), type: 'register' });
+    await Otp.create({ email: email.toLowerCase(), code, type: 'register', expiresAt });
+    await sendOtpEmail(email, code, 'register');
+
+    res.json({ message: 'Code envoyé' });
+  } catch (err) {
+    console.error('[SEND_REGISTER_OTP]', err);
+    res.status(500).json({ message: "Erreur lors de l'envoi de l'e-mail" });
+  }
+};
+
+// ─── POST /api/auth/verify-register-otp ──────────────────────────────────────
+exports.verifyRegisterOtp = async (req, res) => {
+  try {
+    const { email, code } = req.body;
+    const otp = await Otp.findOne({ email: email.toLowerCase(), type: 'register', code });
+    if (!otp)                   return res.status(400).json({ message: 'Code invalide' });
+    if (otp.expiresAt < Date.now()) return res.status(400).json({ message: 'Code expiré' });
+
+    await otp.deleteOne();
+    res.json({ message: 'Email vérifié' });
+  } catch (err) {
+    res.status(500).json({ message: 'Erreur serveur' });
+  }
+};
+
+// ─── POST /api/auth/forgot-password ──────────────────────────────────────────
+exports.forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ message: 'Email requis' });
+
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) return res.status(404).json({ message: 'Aucun compte associé à cet e-mail' });
+
+    const code      = generateOtp();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    await Otp.deleteMany({ email: email.toLowerCase(), type: 'reset' });
+    await Otp.create({ email: email.toLowerCase(), code, type: 'reset', expiresAt });
+    await sendOtpEmail(email, code, 'reset');
+
+    res.json({ message: 'Code de réinitialisation envoyé' });
+  } catch (err) {
+    console.error('[FORGOT_PASSWORD]', err);
+    res.status(500).json({ message: "Erreur lors de l'envoi de l'e-mail" });
+  }
+};
+
+// ─── POST /api/auth/verify-reset-code ────────────────────────────────────────
+exports.verifyResetCode = async (req, res) => {
+  try {
+    const { email, code } = req.body;
+    const otp = await Otp.findOne({ email: email.toLowerCase(), type: 'reset', code });
+    if (!otp)                       return res.status(400).json({ message: 'Code invalide' });
+    if (otp.expiresAt < Date.now()) return res.status(400).json({ message: 'Code expiré' });
+
+    res.json({ message: 'Code valide' });
+  } catch (err) {
+    res.status(500).json({ message: 'Erreur serveur' });
+  }
+};
+
+// ─── POST /api/auth/reset-password ───────────────────────────────────────────
+exports.resetPassword = async (req, res) => {
+  try {
+    const { email, code, newPassword } = req.body;
+    if (!newPassword || newPassword.length < 6)
+      return res.status(400).json({ message: 'Mot de passe trop court (min. 6 caractères)' });
+
+    const otp = await Otp.findOne({ email: email.toLowerCase(), type: 'reset', code });
+    if (!otp)                       return res.status(400).json({ message: 'Code invalide' });
+    if (otp.expiresAt < Date.now()) return res.status(400).json({ message: 'Code expiré' });
+
+    const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
+    if (!user) return res.status(404).json({ message: 'Utilisateur introuvable' });
+
+    user.password = newPassword;
+    await user.save();
+    await otp.deleteOne();
+
+    res.json({ message: 'Mot de passe réinitialisé avec succès' });
+  } catch (err) {
+    console.error('[RESET_PASSWORD]', err);
+    res.status(500).json({ message: 'Erreur serveur' });
   }
 };
