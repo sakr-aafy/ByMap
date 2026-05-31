@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 
 const connectDB = async () => {
   const uri = process.env.MONGO_URI ||
-    `mongodb+srv://waelwbouazizi_db_user:${process.env.DB_PASSWORD}@cluster0.e0hlyy1.mongodb.net/bymap?retryWrites=true&w=majority&appName=Cluster0`;
+    `mongodb+srv://bymap216_db_user:${process.env.DB_PASSWORD}@cluster0.zga1ti8.mongodb.net/bymap?retryWrites=true&w=majority&appName=Cluster0`;
 
   if (!uri || uri.includes('undefined')) {
     console.error('❌  MONGO_URI ou DB_PASSWORD manquant dans les variables d\'environnement');

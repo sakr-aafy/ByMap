@@ -1,20 +1,23 @@
 // src/utils/api.js — Service HTTP ByMap
-import AsyncStorage from '@react-native-async-storage/async-storage';
+// Tokens stockés dans SecureStore (Keychain iOS / Keystore Android) — plus AsyncStorage en clair
+import {
+  saveSession    as _saveSession,
+  getAccessToken as _getAccessToken,
+  getRefreshToken,
+  getCurrentUser as _getCurrentUser,
+  updateTokens,
+  clearSession   as _clearSession,
+} from '../security/secureStorage';
 import { API_URL } from '../environments/environment';
 
 // ─── Helpers stockage token + user ───────────────────────────────────────────
-export const saveSession = async (accessToken, refreshToken, user) => {
-  await AsyncStorage.multiSet([
-    ['accessToken',  accessToken],
-    ['refreshToken', refreshToken],
-    ['currentUser',  JSON.stringify(user)],
-    ['userId',       String(user._id || '')],
-    ['userName',     `${user.prenom || ''} ${user.nom || ''}`.trim()],
-  ]);
-};
 
-export const getAccessToken  = () => AsyncStorage.getItem('accessToken');
-export const getRefreshToken = () => AsyncStorage.getItem('refreshToken');
+export const saveSession = (accessToken, refreshToken, user) =>
+  _saveSession(accessToken, refreshToken, user);
+
+export const getAccessToken  = () => _getAccessToken();
+export const getCurrentUser  = () => _getCurrentUser();
+export const clearSession    = () => _clearSession();
 
 // Refreshes the access token silently; throws if refresh token is also expired.
 async function refreshAccessToken() {
@@ -27,10 +30,8 @@ async function refreshAccessToken() {
   });
   const data = await res.json();
   if (!res.ok) { await clearSession(); throw new Error('Session expirée'); }
-  await AsyncStorage.multiSet([
-    ['accessToken',  data.accessToken],
-    ['refreshToken', data.refreshToken],
-  ]);
+  // Mise à jour sécurisée des tokens dans SecureStore
+  await updateTokens(data.accessToken, data.refreshToken);
   return data.accessToken;
 }
 
@@ -49,15 +50,6 @@ async function authFetch(url, options = {}) {
   }
   return res;
 }
-
-export const getCurrentUser = async () => {
-  const raw = await AsyncStorage.getItem('currentUser');
-  return raw ? JSON.parse(raw) : null;
-};
-
-export const clearSession = async () => {
-  await AsyncStorage.multiRemove(['accessToken', 'refreshToken', 'currentUser', 'userId', 'userName']);
-};
 
 // ─── POST /api/auth/register ──────────────────────────────────────────────────
 export async function register({ nom, prenom, email, phone, password }) {
@@ -85,7 +77,7 @@ export async function login({ email, phone, password }) {
   return data;
 }
 
-// ─── POST /api/auth/verify-login-otp (désactivé) ─────────────────────────────
+// ─── POST /api/auth/verify-login-otp ─────────────────────────────────────────
 export async function verifyLoginOtp({ email, code }) {
   const res  = await fetch(`${API_URL}/auth/verify-login-otp`, {
     method:  'POST',

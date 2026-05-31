@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { createStackNavigator } from '@react-navigation/stack';
 
 import { CallProvider, useCall } from './src/context/CallContext';
+import { SecurityProvider } from './src/security/SecurityProvider.js';
 import { D, shadow } from './src/theme/index';
 
 import Welcome         from './src/screens/Welcome';
@@ -104,6 +105,7 @@ export default function App() {
   if (!langReady) return null; // écran blanc pendant <100ms
 
   return (
+    <SecurityProvider>
     <NavigationContainer ref={navigationRef}>
       <CallProvider navigationRef={navigationRef}>
         <Stack.Navigator
@@ -132,6 +134,7 @@ export default function App() {
         <IncomingCallOverlay />
       </CallProvider>
     </NavigationContainer>
+    </SecurityProvider>
   );
 }
 

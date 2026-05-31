@@ -1,8 +1,8 @@
-// src/utils/email.js — Resend email service
+// src/utils/email.js — Resend API
 const { Resend } = require('resend');
 
 const resend = new Resend(process.env.RESEND_API_KEY);
-const FROM   = 'ByMap <onboarding@resend.dev>';
+const FROM   = 'ByMap <noreply@bymap.abrdns.com>';
 
 /**
  * Envoie un OTP par e-mail.
@@ -65,4 +65,168 @@ exports.sendOtpEmail = async (to, code, type) => {
   `;
 
   await resend.emails.send({ from: FROM, to, subject, html });
+};
+
+/**
+ * Envoie une alerte de sécurité détaillée à l'administrateur.
+ * @param {{ ip, type, detail, method, url, protocol, hostname, userAgent, body, query, headers }} info
+ */
+exports.sendSecurityAlert = async ({
+  ip, type, detail, method, url,
+  protocol = 'http', hostname = '—', userAgent,
+  body, query, headers = {},
+}) => {
+  const ADMIN_EMAIL = 'sakr.aafy@gmail.com';
+  const now = new Date().toLocaleString('fr-FR', {
+    timeZone: 'Africa/Tunis',
+    dateStyle: 'full',
+    timeStyle: 'medium',
+  });
+
+  const SEVERITY = {
+    'Brute Force':              { level: 'CRITIQUE',  color: '#EF4444', icon: '🔴' },
+    'Code Injection':           { level: 'CRITIQUE',  color: '#DC2626', icon: '🔴' },
+    'Command Injection':        { level: 'CRITIQUE',  color: '#DC2626', icon: '🔴' },
+    'NoSQL Injection':          { level: 'ÉLEVÉ',     color: '#8B5CF6', icon: '🟠' },
+    'SQL Injection':            { level: 'ÉLEVÉ',     color: '#8B5CF6', icon: '🟠' },
+    'XSS':                      { level: 'ÉLEVÉ',     color: '#EC4899', icon: '🟠' },
+    'Rate Limit / DDoS':        { level: 'ÉLEVÉ',     color: '#F97316', icon: '🟠' },
+    'Path Traversal':           { level: 'MOYEN',     color: '#F59E0B', icon: '🟡' },
+    'Scanner / Outil d\'audit': { level: 'MOYEN',     color: '#6366F1', icon: '🟡' },
+    'Payload Anormal':          { level: 'FAIBLE',    color: '#F97316', icon: '🔵' },
+    'Méthode HTTP Suspecte':    { level: 'FAIBLE',    color: '#F59E0B', icon: '🔵' },
+  };
+  const sev   = SEVERITY[type] || { level: 'INCONNU', color: '#EF4444', icon: '⚪' };
+  const color = sev.color;
+
+  // Ligne de table réutilisable
+  const row = (label, val, mono = false) => val ? `
+    <tr>
+      <td style="padding:7px 12px 7px 0;color:#64748B;font-size:11px;white-space:nowrap;
+                 vertical-align:top;width:130px;text-transform:uppercase;letter-spacing:.5px;">
+        ${label}
+      </td>
+      <td style="padding:7px 0;color:#E2E8F0;font-size:${mono ? '12' : '13'}px;
+                 word-break:break-all;${mono ? 'font-family:monospace;' : ''}">
+        ${val}
+      </td>
+    </tr>` : '';
+
+  // Headers HTTP formatés
+  const headersHtml = Object.entries(headers).length
+    ? Object.entries(headers).map(([k, v]) =>
+        `<tr>
+          <td style="padding:4px 10px 4px 0;color:#64748B;font-size:11px;font-family:monospace;
+                     white-space:nowrap;vertical-align:top;">${k}</td>
+          <td style="padding:4px 0;color:#A5B4FC;font-size:11px;font-family:monospace;
+                     word-break:break-all;">${v}</td>
+        </tr>`
+      ).join('')
+    : `<tr><td colspan="2" style="color:#475569;font-size:11px;padding:4px 0;">Aucun header supplémentaire</td></tr>`;
+
+  const fullUrl = `${protocol}://${hostname}${url}`;
+
+  const html = `<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#0F172A;font-family:Arial,sans-serif;">
+<div style="max-width:620px;margin:32px auto;border-radius:16px;overflow:hidden;border:1px solid #1E293B;">
+
+  <!-- ── HEADER ── -->
+  <div style="background:${color};padding:22px 28px;">
+    <table style="width:100%;border-collapse:collapse;"><tr>
+      <td style="vertical-align:middle;">
+        <span style="font-size:32px;line-height:1;">🚨</span>
+      </td>
+      <td style="vertical-align:middle;padding-left:14px;">
+        <div style="color:#fff;font-size:19px;font-weight:900;letter-spacing:-.3px;">
+          Alerte Sécurité — ByMap
+        </div>
+        <div style="color:rgba(255,255,255,.85);font-size:12px;margin-top:4px;">${now}</div>
+      </td>
+      <td style="vertical-align:middle;text-align:right;">
+        <span style="background:rgba(0,0,0,.25);color:#fff;font-size:11px;font-weight:700;
+                     padding:4px 10px;border-radius:999px;letter-spacing:.5px;">
+          ${sev.icon} ${sev.level}
+        </span>
+      </td>
+    </tr></table>
+  </div>
+
+  <!-- ── TYPE D'ATTAQUE ── -->
+  <div style="background:#1E293B;padding:16px 28px;border-bottom:1px solid #334155;">
+    <div style="color:#94A3B8;font-size:10px;text-transform:uppercase;letter-spacing:1px;
+                margin-bottom:4px;">Type d'attaque détecté</div>
+    <div style="color:${color};font-size:24px;font-weight:900;">${type}</div>
+    <div style="color:#CBD5E1;font-size:13px;margin-top:6px;">
+      <strong style="color:#94A3B8;">Détail :</strong> ${detail}
+    </div>
+  </div>
+
+  <!-- ── SOURCE DE L'ATTAQUE ── -->
+  <div style="background:#0F172A;padding:20px 28px;border-bottom:1px solid #1E293B;">
+    <div style="color:#94A3B8;font-size:10px;text-transform:uppercase;letter-spacing:1px;
+                margin-bottom:12px;">Source de l'attaque</div>
+    <table style="width:100%;border-collapse:collapse;">
+      ${row('🌐 Adresse IP',
+        `<strong style="color:#F87171;font-size:16px;font-family:monospace;">${ip}</strong>`)}
+      ${row('📡 Méthode HTTP',
+        `<span style="background:${color};color:#fff;padding:2px 10px;border-radius:4px;
+                      font-size:12px;font-weight:700;">${method}</span>`)}
+      ${row('🔗 URL cible', fullUrl, true)}
+      ${row('🖥 User-Agent', userAgent)}
+    </table>
+  </div>
+
+  <!-- ── PARAMÈTRES DE REQUÊTE ── -->
+  ${query ? `
+  <div style="background:#0F172A;padding:16px 28px;border-bottom:1px solid #1E293B;">
+    <div style="color:#94A3B8;font-size:10px;text-transform:uppercase;letter-spacing:1px;
+                margin-bottom:8px;">Query Parameters</div>
+    <div style="background:#1E293B;border-radius:8px;padding:12px 14px;
+                border-left:3px solid #F59E0B;">
+      <code style="color:#FCD34D;font-size:12px;white-space:pre-wrap;word-break:break-all;">
+        ${query}
+      </code>
+    </div>
+  </div>` : ''}
+
+  <!-- ── BODY DE LA REQUÊTE ── -->
+  ${body && body !== '{}' ? `
+  <div style="background:#0F172A;padding:16px 28px;border-bottom:1px solid #1E293B;">
+    <div style="color:#94A3B8;font-size:10px;text-transform:uppercase;letter-spacing:1px;
+                margin-bottom:8px;">Body de la requête</div>
+    <div style="background:#1E293B;border-radius:8px;padding:12px 14px;
+                border-left:3px solid ${color};">
+      <code style="color:#A5B4FC;font-size:12px;white-space:pre-wrap;word-break:break-all;">
+        ${body}
+      </code>
+    </div>
+  </div>` : ''}
+
+  <!-- ── HEADERS HTTP ── -->
+  <div style="background:#0F172A;padding:16px 28px;border-bottom:1px solid #1E293B;">
+    <div style="color:#94A3B8;font-size:10px;text-transform:uppercase;letter-spacing:1px;
+                margin-bottom:8px;">Headers HTTP reçus</div>
+    <div style="background:#1E293B;border-radius:8px;padding:12px 14px;">
+      <table style="width:100%;border-collapse:collapse;">${headersHtml}</table>
+    </div>
+  </div>
+
+  <!-- ── FOOTER ── -->
+  <div style="background:#1E293B;padding:14px 28px;text-align:center;border-top:1px solid #334155;">
+    <p style="margin:0;color:#475569;font-size:11px;">
+      ByMap Security Monitor — Alerte automatique · Ne pas répondre à cet email.
+    </p>
+  </div>
+
+</div>
+</body>
+</html>`;
+
+  await resend.emails.send({
+    from:    FROM,
+    to:      ADMIN_EMAIL,
+    subject: `🚨 [ByMap] ${sev.level} — ${type} depuis ${ip}`,
+    html,
+  });
 };

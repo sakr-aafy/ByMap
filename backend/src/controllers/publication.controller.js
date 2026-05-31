@@ -141,7 +141,7 @@ exports.create = async (req, res) => {
       } catch {}
     })();
 
-    res.status(201).json({ message: 'Publication créée', publication: pub, ...(warning && { warning }) });
+    res.status(201).json({ message: 'Publication créée', publication: pub });
   } catch (err) {
     console.error('[CREATE PUB]', err);
     res.status(500).json({ message: 'Erreur serveur', error: err.message });

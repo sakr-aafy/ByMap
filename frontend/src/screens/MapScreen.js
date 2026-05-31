@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { FontAwesome6 } from '@expo/vector-icons';
 import {
   StyleSheet,
@@ -26,8 +26,6 @@ import { useTranslation } from 'react-i18next';
 
 const DEFAULT_COORDS = { latitude: 36.8065, longitude: 10.1815 };
 
-const SATELLITE_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
-const SATELLITE_SERVERS = [''];
 
 // ─── Styles de carte disponibles ─────────────────────────────────────────────
 const MAP_STYLES = [
@@ -180,118 +178,131 @@ const ZONE_RADII = [
 ];
 
 // ─── Globe 3D HTML ────────────────────────────────────────────────────────────
-const buildGlobeHTML = (lat, lng) => {
+const buildGlobeHTML = (lat, lng, styleKey = 'satellite') => {
+  const gs = MAP_STYLES.find(s => s.key === styleKey) || MAP_STYLES.find(s => s.key === 'satellite');
   return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-<link rel="preconnect" href="https://cdnjs.cloudflare.com"/>
-<link rel="preconnect" href="https://server.arcgisonline.com"/>
-<link rel="preconnect" href="https://tile.openstreetmap.org"/>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;background:#000005;overflow:hidden}
+html,body{width:100%;height:100%;background:#00010a;overflow:hidden}
 canvas{display:block}
-#loader{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
-  color:#fff;font-family:-apple-system,sans-serif;font-size:16px;
-  display:flex;flex-direction:column;align-items:center;gap:12px}
-.spinner{width:40px;height:40px;border:3px solid rgba(255,255,255,0.2);
-  border-top-color:#6C72CB;border-radius:50%;animation:spin .8s linear infinite}
+#loader{
+  position:fixed;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:14px;
+  background:radial-gradient(ellipse at 50% 60%,#060d2a 0%,#00010a 70%);
+  transition:opacity .5s ease;z-index:10;
+}
+#loader.out{opacity:0;pointer-events:none}
+.spinner{
+  width:42px;height:42px;
+  border:2.5px solid rgba(91,110,245,0.25);
+  border-top-color:#5B6EF5;
+  border-radius:50%;
+  animation:spin .85s cubic-bezier(.4,0,.2,1) infinite;
+}
+.loader-label{color:rgba(255,255,255,.45);font-family:-apple-system,sans-serif;font-size:13px;letter-spacing:.6px}
 @keyframes spin{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
-<div id="loader"><div class="spinner"></div><span>Chargement...</span></div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" crossorigin="anonymous" defer></script>
+<div id="loader"><div class="spinner"></div><span class="loader-label">Chargement du globe…</span></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" crossorigin="anonymous"></script>
 <script>
-window.addEventListener('load', function() {
-  document.getElementById('loader').style.display = 'none';
-  initGlobe();
-});
+var _threeReady = typeof THREE !== 'undefined';
+function _onThreeReady() { document.getElementById('loader').classList.add('out'); setTimeout(initGlobe, 80); }
+if (_threeReady) { _onThreeReady(); }
+else { document.querySelector('script[src*="three"]').addEventListener('load', _onThreeReady); }
 
 function initGlobe() {
   var W = window.innerWidth, H = window.innerHeight;
   var scene  = new THREE.Scene();
   var camera = new THREE.PerspectiveCamera(40, W/H, 0.01, 1000);
   camera.position.z = 2.6;
-  var renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+
+  var renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance', alpha:false });
   renderer.setSize(W, H);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setClearColor(0x00010a);
   document.body.appendChild(renderer.domElement);
 
   var minZ = 0.85, maxZ = 5.0;
 
-  // Étoiles
-  var starPos = new Float32Array(6000 * 3);
-  for (var i = 0; i < starPos.length; i++) starPos[i] = (Math.random() - 0.5) * 400;
-  var sg = new THREE.BufferGeometry();
-  sg.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-  scene.add(new THREE.Points(sg, new THREE.PointsMaterial({ color:0xffffff, size:0.15, transparent:true, opacity:0.6 })));
+  // ── Étoiles en 3 couches (petit / moyen / brillant) ─────────────────────
+  function starLayer(n, size, opacity) {
+    var p = new Float32Array(n * 3);
+    for (var i = 0; i < p.length; i++) p[i] = (Math.random() - .5) * 480;
+    var g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(p, 3));
+    return new THREE.Points(g, new THREE.PointsMaterial({
+      color:0xffffff, size:size, transparent:true, opacity:opacity, sizeAttenuation:true
+    }));
+  }
+  scene.add(starLayer(4500, 0.22, 0.55));
+  scene.add(starLayer(1000, 0.48, 0.35));
+  scene.add(starLayer(180,  0.85, 0.22));
 
-  // Texture tuiles
-  var ZOOM = 3, TILE_COUNT = 8, TILE_SIZE = 128, TEX_SIZE = 1024;
-  var texCanvas = document.createElement('canvas');
-  texCanvas.width = texCanvas.height = TEX_SIZE;
-  var ctx = texCanvas.getContext('2d');
-  ctx.fillStyle = '#aad3df';
-  ctx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
-  var mapTex = new THREE.CanvasTexture(texCanvas);
+  // ── Texture satellite ────────────────────────────────────────────────────
+  var ZOOM=3, TILE_N=8, TILE_SZ=128, TEX_SZ=1024;
+  var tc = document.createElement('canvas');
+  tc.width = tc.height = TEX_SZ;
+  var ctx = tc.getContext('2d');
+  ctx.fillStyle = '#0d2240'; ctx.fillRect(0,0,TEX_SZ,TEX_SZ);
+  var mapTex = new THREE.CanvasTexture(tc);
   mapTex.generateMipmaps = true;
   mapTex.minFilter = THREE.LinearMipmapLinearFilter;
+  mapTex.anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 4);
 
-  var SERVERS  = ${JSON.stringify(SATELLITE_SERVERS)};
-  var BASE_URL = '${SATELLITE_URL}';
+  var SERVERS = ${JSON.stringify(gs.subdomains)};
+  var BASE_URL = '${gs.url}';
 
-  function getTileUrl(x, y) {
-    var s = SERVERS[0] !== '' ? SERVERS[x % SERVERS.length] : '';
-    return BASE_URL.replace('{s}',s).replace('{z}',ZOOM).replace('{x}',x).replace('{y}',y);
+  function tileUrl(x,y) {
+    var s = SERVERS.length > 1 ? SERVERS[x % SERVERS.length] : (SERVERS[0] || '');
+    return BASE_URL.replace('{s}',s).replace('{z}',ZOOM).replace('{x}',x).replace('{y}',y).replace('{r}','');
   }
-
   function loadTiles() {
-    ctx.fillStyle = '#aad3df';
-    ctx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
-    var tiles = [];
-    for (var tx = 0; tx < TILE_COUNT; tx++)
-      for (var ty = 0; ty < TILE_COUNT; ty++)
-        tiles.push([tx, ty]);
-    var BATCH = 8, idx = 0;
-    function loadBatch() {
-      var batch = tiles.slice(idx, idx + BATCH); idx += BATCH;
-      if (!batch.length) return;
-      var done = 0;
-      batch.forEach(function(t) {
-        var img = new Image(); img.crossOrigin = 'anonymous';
-        img.src = getTileUrl(t[0], t[1]);
-        img.onload = function() {
-          ctx.drawImage(img, t[0]*TILE_SIZE, t[1]*TILE_SIZE, TILE_SIZE, TILE_SIZE);
-          mapTex.needsUpdate = true;
-          if (++done === batch.length) loadBatch();
-        };
-        img.onerror = function() { if (++done === batch.length) loadBatch(); };
+    ctx.fillStyle='#0d2240'; ctx.fillRect(0,0,TEX_SZ,TEX_SZ);
+    var tiles=[]; for(var tx=0;tx<TILE_N;tx++) for(var ty=0;ty<TILE_N;ty++) tiles.push([tx,ty]);
+    var B=6, idx=0;
+    function batch() {
+      var b=tiles.slice(idx,idx+B); idx+=B; if(!b.length) return;
+      var done=0;
+      b.forEach(function(t){
+        var img=new Image(); img.crossOrigin='anonymous'; img.src=tileUrl(t[0],t[1]);
+        img.onload=function(){ ctx.drawImage(img,t[0]*TILE_SZ,t[1]*TILE_SZ,TILE_SZ,TILE_SZ); mapTex.needsUpdate=true; if(++done===b.length) batch(); };
+        img.onerror=function(){ if(++done===b.length) batch(); };
       });
     }
-    loadBatch();
+    batch();
   }
   loadTiles();
 
-  // Globe
+  // ── Globe ────────────────────────────────────────────────────────────────
   var globe = new THREE.Mesh(
-    new THREE.SphereGeometry(0.7, 48, 48),
-    new THREE.MeshPhongMaterial({ map: mapTex, specular: new THREE.Color(0x111122), shininess: 6 })
+    new THREE.SphereGeometry(0.7, 42, 42),
+    new THREE.MeshPhongMaterial({ map:mapTex, specular:new THREE.Color(0x0a1833), shininess:14 })
   );
   scene.add(globe);
 
-  // Atmosphère
+  // Halo atmosphérique interne
   scene.add(new THREE.Mesh(
-    new THREE.SphereGeometry(0.75, 32, 32),
-    new THREE.MeshBasicMaterial({ color:0x1a44cc, transparent:true, opacity:0.07, side:THREE.BackSide })
+    new THREE.SphereGeometry(0.725, 32, 32),
+    new THREE.MeshBasicMaterial({ color:0x1a5cdd, transparent:true, opacity:0.07, side:THREE.BackSide })
+  ));
+  // Glow externe
+  scene.add(new THREE.Mesh(
+    new THREE.SphereGeometry(0.80, 32, 32),
+    new THREE.MeshBasicMaterial({ color:0x2244aa, transparent:true, opacity:0.03, side:THREE.BackSide })
   ));
 
-  // Lumières
-  scene.add(new THREE.AmbientLight(0x445566, 1.2));
-  var sun = new THREE.DirectionalLight(0xffffff, 1.1);
-  sun.position.set(5,3,5); scene.add(sun);
+  // ── Lumières ─────────────────────────────────────────────────────────────
+  scene.add(new THREE.AmbientLight(0x223355, 0.85));
+  var sun = new THREE.DirectionalLight(0xfff6e8, 1.35);
+  sun.position.set(5,3,4); scene.add(sun);
+  var fill = new THREE.DirectionalLight(0x112244, 0.35);
+  fill.position.set(-4,-2,-3); scene.add(fill);
 
   function orientTo(lat, lng) {
     globe.rotation.y = -(lng+180)*Math.PI/180;
@@ -299,59 +310,70 @@ function initGlobe() {
   }
   orientTo(${lat}, ${lng});
 
-  // Touch
-  var autoRotate=true, rotSpeed=0.0018;
+  // ── Touch (drag + pinch + inertie) ───────────────────────────────────────
+  var autoRotate=true, rotSpeed=0.0014;
   var dragging=false, lastX=0, lastY=0, lastPinchDist=0;
-  var autoTimer=null, switchSent=false;
+  var velX=0, velY=0, autoTimer=null, switchSent=false;
 
-  renderer.domElement.addEventListener('touchstart', function(e) {
-    if (autoTimer) clearTimeout(autoTimer);
-    autoRotate=false; switchSent=false;
-    if (e.touches.length===1) { dragging=true; lastX=e.touches[0].clientX; lastY=e.touches[0].clientY; }
-    else if (e.touches.length===2) { dragging=false; lastPinchDist=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY); }
-  }, { passive:true });
+  renderer.domElement.addEventListener('touchstart', function(e){
+    if(autoTimer) clearTimeout(autoTimer);
+    autoRotate=false; switchSent=false; velX=0; velY=0;
+    if(e.touches.length===1){ dragging=true; lastX=e.touches[0].clientX; lastY=e.touches[0].clientY; }
+    else if(e.touches.length===2){
+      dragging=false;
+      lastPinchDist=Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+    }
+  },{passive:true});
 
-  renderer.domElement.addEventListener('touchmove', function(e) {
+  renderer.domElement.addEventListener('touchmove', function(e){
     e.preventDefault();
-    if (e.touches.length===1 && dragging) {
+    if(e.touches.length===1 && dragging){
       var dx=e.touches[0].clientX-lastX, dy=e.touches[0].clientY-lastY;
       globe.rotation.y+=dx*0.006; globe.rotation.x+=dy*0.006;
-      globe.rotation.x=Math.max(-1.2,Math.min(1.2,globe.rotation.x));
+      globe.rotation.x=Math.max(-1.3,Math.min(1.3,globe.rotation.x));
+      velX=dx*0.004; velY=dy*0.004;
       lastX=e.touches[0].clientX; lastY=e.touches[0].clientY;
-    } else if (e.touches.length===2) {
-      var dist=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
-      camera.position.z=Math.max(minZ,Math.min(maxZ,camera.position.z+(lastPinchDist-dist)*0.008));
+    } else if(e.touches.length===2){
+      var dist=Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+      camera.position.z=Math.max(minZ,Math.min(maxZ, camera.position.z+(lastPinchDist-dist)*0.009));
       lastPinchDist=dist;
-      if (camera.position.z<=minZ+0.02 && !switchSent) {
+      if(camera.position.z<=minZ+0.03 && !switchSent){
         switchSent=true;
         var cLng=-(globe.rotation.y*180/Math.PI)-180;
         var cLat=-(globe.rotation.x/0.6)*180/Math.PI;
         window.ReactNativeWebView.postMessage('SWITCH_TO_MAP:'+cLat.toFixed(5)+':'+cLng.toFixed(5));
       }
     }
-  }, { passive:false });
+  },{passive:false});
 
-  renderer.domElement.addEventListener('touchend', function() {
+  renderer.domElement.addEventListener('touchend', function(){
     dragging=false;
-    autoTimer=setTimeout(function(){ autoRotate=true; }, 4000);
-  }, { passive:true });
+    autoTimer=setTimeout(function(){ autoRotate=true; velX=0; velY=0; }, 3500);
+  },{passive:true});
 
-  window.centerGlobe = function(lat, lng) { orientTo(lat, lng); };
-  window.reloadStyle = function(baseUrl, servers) { BASE_URL=baseUrl; SERVERS=servers; loadTiles(); };
-  window.orientTo    = function(lat, lng) { orientTo(lat, lng); };
+  window.centerGlobe = function(lat,lng){ orientTo(lat,lng); };
+  window.reloadStyle = function(url,srv){ BASE_URL=url; SERVERS=srv; loadTiles(); };
+  window.orientTo    = function(lat,lng){ orientTo(lat,lng); };
 
-  // Animation
-  var lastFrame = 0;
-  function animate(ts) {
+  // ── Boucle de rendu (~60 fps, inertie post-swipe) ────────────────────────
+  var lastFrame=0;
+  function animate(ts){
     requestAnimationFrame(animate);
-    if (ts - lastFrame < 16) return;
-    lastFrame = ts;
-    if (autoRotate && !dragging) globe.rotation.y += rotSpeed;
-    renderer.render(scene, camera);
+    if(ts-lastFrame < 14) return;
+    lastFrame=ts;
+    if(!dragging){
+      globe.rotation.y+=velX; globe.rotation.x+=velY;
+      globe.rotation.x=Math.max(-1.3,Math.min(1.3,globe.rotation.x));
+      velX*=0.90; velY*=0.90;
+      if(Math.abs(velX)<0.0001) velX=0;
+      if(Math.abs(velY)<0.0001) velY=0;
+    }
+    if(autoRotate) globe.rotation.y+=rotSpeed;
+    renderer.render(scene,camera);
   }
   requestAnimationFrame(animate);
 
-  window.addEventListener('resize', function() {
+  window.addEventListener('resize',function(){
     W=window.innerWidth; H=window.innerHeight;
     camera.aspect=W/H; camera.updateProjectionMatrix(); renderer.setSize(W,H);
   });
@@ -371,15 +393,46 @@ const buildMapHTML = (lat, lng, pickMode = false, zoneRadius = 1000, styleKey = 
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-<link rel="preconnect" href="https://server.arcgisonline.com"/>
-<link rel="preconnect" href="https://a.tile.openstreetmap.org"/>
-<link rel="preconnect" href="https://basemaps.cartocdn.com"/>
-<link rel="preconnect" href="https://tile.opentopomap.org"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html,body,#map{width:100%;height:100%;overflow:hidden}
 .leaflet-control-attribution,.leaflet-control-zoom{display:none!important}
+
+/* ── Marqueur pulsé (points verts zone) ── */
+@keyframes dot-pulse {
+  0%   { box-shadow:0 0 0 0   rgba(0,250,62,.55), 0 2px 8px rgba(0,0,0,.2); }
+  60%  { box-shadow:0 0 0 8px rgba(0,250,62,.0),  0 2px 8px rgba(0,0,0,.2); }
+  100% { box-shadow:0 0 0 0   rgba(0,250,62,.0),  0 2px 8px rgba(0,0,0,.2); }
+}
+.dot-pulse {
+  width:11px;height:11px;border-radius:50%;
+  background:#00fa3e;border:2.5px solid #00c42e;
+  animation:dot-pulse 2s ease-out infinite;
+  cursor:pointer;transition:transform .15s;
+}
+.dot-pulse:active{transform:scale(1.4)}
+
+/* ── Tooltip dark ── */
+.leaflet-tooltip {
+  background:rgba(12,14,28,.88) !important;
+  border:1px solid rgba(255,255,255,.1) !important;
+  border-radius:10px !important;
+  color:#e2e8f0 !important;
+  font-size:12px !important;
+  padding:7px 11px !important;
+  box-shadow:0 4px 20px rgba(0,0,0,.45) !important;
+  backdrop-filter:blur(6px);
+}
+.leaflet-tooltip::before{display:none!important}
+
+/* ── Cercle de zone animé ── */
+@keyframes circle-dash {
+  to { stroke-dashoffset: -30; }
+}
+.zone-circle-path {
+  animation: circle-dash 2.5s linear infinite;
+}
 </style>
 </head>
 <body>
@@ -388,189 +441,134 @@ html,body,#map{width:100%;height:100%;overflow:hidden}
 <script>
 var map = L.map('map', {
   center:[${lat},${lng}], zoom:6,
-  zoomControl:false, attributionControl:false, preferCanvas:true,
+  zoomControl:false, attributionControl:false,
+  preferCanvas:true,
+  zoomAnimationThreshold:4,
 });
-L.tileLayer('${style.url}', {
+
+var tileLayer = L.tileLayer('${style.url}', {
   subdomains:${JSON.stringify(style.subdomains)},
-  maxZoom:${style.maxZoom}, minZoom:1, keepBuffer:6, updateWhenIdle:false, crossOrigin:true,
-}).addTo(map);
-window.centerOnUser = function(lat,lng) { map.setView([lat,lng], map.getZoom(), { animate:true, duration:0.5 }); };
-
-// ── Zone Circle — toujours disponible (pickMode ET snapToZone Radio Garden) ──
-var zoneCircle = null;
-var isPickMode = ${pickMode ? 'true' : 'false'};
-
-// Créer le cercle en mode pick OU en mode normal (pour Radio Garden snap)
-zoneCircle = L.circle([${lat},${lng}], {
-  radius: ${zoneRadius},
-  color: '#34C759',
-  fillColor: '#34C759',
-  fillOpacity: isPickMode ? 0.12 : 0.08,
-  weight: isPickMode ? 2.5 : 2,
-  dashArray: '6,4',
-  opacity: isPickMode ? 1 : 0,    // invisible par défaut sauf en pickMode
+  maxZoom:${style.maxZoom}, minZoom:1,
+  keepBuffer:4, updateWhenIdle:false,
+  detectRetina:true, crossOrigin:true,
 }).addTo(map);
 
-// Afficher / masquer le cercle
-window.showZoneCircle = function(show) {
-  if (zoneCircle) {
-    zoneCircle.setStyle({ opacity: show ? 1 : 0, fillOpacity: show ? 0.12 : 0 });
-  }
+window.centerOnUser = function(lat,lng) {
+  map.setView([lat,lng], map.getZoom(), { animate:true, duration:0.6 });
 };
 
-// Déplacer + afficher avec animation flyTo (Radio Garden)
+// ── Réinitialiser le fond de carte sans remount ────────────────────────────────
+window.reloadStyle = function(url, subdomains, maxZoom) {
+  map.removeLayer(tileLayer);
+  tileLayer = L.tileLayer(url, {
+    subdomains: subdomains || ['a','b','c'],
+    maxZoom: maxZoom || 19, minZoom:1,
+    keepBuffer:4, updateWhenIdle:false,
+    detectRetina:true, crossOrigin:true,
+  }).addTo(map);
+};
+
+// ── Cercle de zone ─────────────────────────────────────────────────────────────
+var isPickMode = ${pickMode ? 'true' : 'false'};
+var zoneCircle = L.circle([${lat},${lng}], {
+  radius: ${zoneRadius},
+  color:'#34C759', fillColor:'#34C759',
+  fillOpacity: isPickMode ? 0.10 : 0.07,
+  weight: isPickMode ? 2.5 : 2,
+  dashArray:'8,5',
+  opacity: isPickMode ? 1 : 0,
+}).addTo(map);
+
+// Animer les tirets du cercle via SVG classe après ajout
+setTimeout(function(){
+  var paths = document.querySelectorAll('.leaflet-overlay-pane path');
+  paths.forEach(function(p){ p.classList.add('zone-circle-path'); });
+}, 200);
+
+window.showZoneCircle = function(show) {
+  zoneCircle.setStyle({ opacity:show?1:0, fillOpacity:show?0.10:0 });
+};
+
 window.snapZoneToPoint = function(lat, lng, radius, zoneName) {
-  if (zoneCircle) {
-    zoneCircle.setLatLng([lat, lng]);
-    zoneCircle.setRadius(radius || 1000);
-    zoneCircle.setStyle({ opacity: 1, fillOpacity: 0.14, color: '#34C759', fillColor: '#34C759' });
-  }
-  map.flyTo([lat, lng], 13, { animate: true, duration: 1.1 });
-  // Message retour
-  window.ReactNativeWebView.postMessage('ZONE_SNAP:' + lat.toFixed(5) + ':' + lng.toFixed(5) + ':' + (zoneName || ''));
+  zoneCircle.setLatLng([lat,lng]);
+  zoneCircle.setRadius(radius||1000);
+  zoneCircle.setStyle({ opacity:1, fillOpacity:0.12, color:'#34C759', fillColor:'#34C759' });
+  map.flyTo([lat,lng], 13, { animate:true, duration:1.0, easeLinearity:0.3 });
+  window.ReactNativeWebView.postMessage('ZONE_SNAP:'+lat.toFixed(5)+':'+lng.toFixed(5)+':'+(zoneName||''));
 };
 
 window.updateZoneCircle = function(lat, lng, radius) {
-  if (zoneCircle) {
-    zoneCircle.setLatLng([lat, lng]);
-    zoneCircle.setRadius(radius);
-  }
+  zoneCircle.setLatLng([lat,lng]);
+  zoneCircle.setRadius(radius);
 };
 
 map.on('moveend', function() {
   var c = map.getCenter();
   window.ReactNativeWebView.postMessage('MAP_CENTER:'+c.lat.toFixed(6)+':'+c.lng.toFixed(6));
-  if (isPickMode && zoneCircle) {
-    zoneCircle.setLatLng([c.lat, c.lng]);
-  }
+  if (isPickMode) zoneCircle.setLatLng([c.lat,c.lng]);
 });
 map.on('zoomend', function() {
   if (map.getZoom() <= 2) window.ReactNativeWebView.postMessage('SWITCH_TO_GLOBE');
 });
 
-// ── Points verts par zone — CLIQUABLES (Radio Garden) ────────────────────────
+// ── Points verts — CLIQUABLES avec animation pulse ────────────────────────────
 var zoneDotLayer = L.layerGroup().addTo(map);
 window.addZoneDots = function(dots) {
   zoneDotLayer.clearLayers();
   dots.forEach(function(d) {
-    var pulse = L.divIcon({
-      className: '',
-      html: '<div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;">' +
-            '<div style="width:10px;height:10px;border-radius:50%;background:#00fa3e;border:2.5px solid #00c42e;box-shadow:0 0 0 6px rgba(0,250,62,0.22),0 2px 8px rgba(0,0,0,0.18);cursor:pointer;transition:transform 0.15s;"></div>' +
-            '</div>',
-      iconSize: [36, 36],
-      iconAnchor: [18, 18],
+    var icon = L.divIcon({
+      className:'',
+      html:'<div style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;">' +
+           '<div class="dot-pulse"></div></div>',
+      iconSize:[34,34], iconAnchor:[17,17],
     });
-    var m = L.marker([d.lat, d.lng], { icon: pulse });
+    var m = L.marker([d.lat,d.lng], { icon:icon });
     m.bindTooltip(
-      '<b>' + d.name + '</b><br/>' +
-      '<span style="color:#34C759">● ' + d.local + ' local</span>  ' +
-      '<span style="color:#1E90FF">● ' + d.duo + ' duo</span>',
-      { direction: 'top', offset: [0, -18] }
+      '<b style="font-size:13px">' + d.name + '</b><br/>' +
+      '<span style="color:#34C759;font-size:11px">● ' + d.local + ' local</span>' +
+      '&nbsp;&nbsp;<span style="color:#60a5fa;font-size:11px">● ' + d.duo + ' duo</span>',
+      { direction:'top', offset:[0,-17], permanent:false }
     );
-    // ── CLIC sur point vert → snap Radio Garden ──
-    m.on('click', function() {
-      window.snapZoneToPoint(d.lat, d.lng, 1000, d.name);
-    });
+    m.on('click', function(){ window.snapZoneToPoint(d.lat,d.lng,1000,d.name); });
     zoneDotLayer.addLayer(m);
   });
 };
 
-// ── Icônes SVG par catégorie — Zones admin ───────────────────────────────────
-// Normalise : supprime accents + minuscules  →  "Université" → "universite"
+// ── Icônes SVG par catégorie — Zones admin ────────────────────────────────────
 function normCat(s) {
-  return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+  return (s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
 }
-
-// Icônes SVG inline (viewBox 0 0 24 24, fill currentColor) — pas de CDN requis
 var ZONE_ICONS = {
-  hotel: {
-    color: '#8B5CF6',
-    svg: '<rect fill="currentColor" x="2" y="16" width="20" height="3" rx="1.5"/>' +
-         '<rect fill="currentColor" x="2" y="5" width="3" height="13" rx="1.5"/>' +
-         '<rect fill="currentColor" x="5" y="10" width="17" height="9" rx="2"/>' +
-         '<rect fill="currentColor" x="6" y="7" width="5" height="5" rx="1"/>' +
-         '<rect fill="currentColor" x="13" y="7" width="5" height="5" rx="1"/>',
-  },
-  sante: {
-    color: '#EF4444',
-    svg: '<rect fill="currentColor" x="10" y="3" width="4" height="18" rx="2"/>' +
-         '<rect fill="currentColor" x="3" y="10" width="18" height="4" rx="2"/>',
-  },
-  universite: {
-    color: '#3B7EF6',
-    svg: '<polygon fill="currentColor" points="12,4 23,9.5 12,15 1,9.5"/>' +
-         '<path fill="currentColor" d="M6,13 L6,18 Q6,21 12,21 Q18,21 18,18 L18,13 L12,16 Z"/>',
-  },
-  restaurant: {
-    color: '#F59E0B',
-    svg: '<rect fill="currentColor" x="6" y="3" width="1.5" height="8" rx="0.75"/>' +
-         '<rect fill="currentColor" x="8" y="3" width="1.5" height="8" rx="0.75"/>' +
-         '<rect fill="currentColor" x="10" y="3" width="1.5" height="8" rx="0.75"/>' +
-         '<rect fill="currentColor" x="7.5" y="11" width="2" height="10" rx="1"/>' +
-         '<path fill="currentColor" d="M15,3 L18,3 Q20,5 20,9 L15,9 Z"/>' +
-         '<rect fill="currentColor" x="15" y="9" width="2.5" height="12" rx="1.25"/>',
-  },
-  commerce: {
-    color: '#14B8A6',
-    svg: '<path fill="currentColor" d="M2,10 L5,3 L19,3 L22,10 Z"/>' +
-         '<rect fill="currentColor" x="3" y="10" width="18" height="12" rx="1"/>',
-  },
-  parc: {
-    color: '#22C55E',
-    svg: '<path fill="currentColor" d="M12,2 L22,16 L17,16 L17,21 L7,21 L7,16 L2,16 Z"/>',
-  },
-  musee: {
-    color: '#D97706',
-    svg: '<polygon fill="currentColor" points="1,9 23,9 12,3"/>' +
-         '<rect fill="currentColor" x="2" y="9" width="3" height="11"/>' +
-         '<rect fill="currentColor" x="7.5" y="9" width="3" height="11"/>' +
-         '<rect fill="currentColor" x="13.5" y="9" width="3" height="11"/>' +
-         '<rect fill="currentColor" x="19" y="9" width="3" height="11"/>' +
-         '<rect fill="currentColor" x="1" y="20" width="22" height="3" rx="1"/>',
-  },
-  sport: {
-    color: '#6366F1',
-    svg: '<rect fill="currentColor" x="1" y="9" width="4" height="6" rx="1.5"/>' +
-         '<rect fill="currentColor" x="19" y="9" width="4" height="6" rx="1.5"/>' +
-         '<rect fill="currentColor" x="2.5" y="7" width="3" height="10" rx="1"/>' +
-         '<rect fill="currentColor" x="18.5" y="7" width="3" height="10" rx="1"/>' +
-         '<rect fill="currentColor" x="5.5" y="11" width="13" height="2" rx="1"/>',
-  },
-  autre: {
-    color: '#6B7280',
-    svg: '<circle fill="currentColor" cx="5" cy="12" r="2.5"/>' +
-         '<circle fill="currentColor" cx="12" cy="12" r="2.5"/>' +
-         '<circle fill="currentColor" cx="19" cy="12" r="2.5"/>',
-  },
+  hotel:      { color:'#8B5CF6', svg:'<rect fill="currentColor" x="2" y="16" width="20" height="3" rx="1.5"/><rect fill="currentColor" x="2" y="5" width="3" height="13" rx="1.5"/><rect fill="currentColor" x="5" y="10" width="17" height="9" rx="2"/><rect fill="currentColor" x="6" y="7" width="5" height="5" rx="1"/><rect fill="currentColor" x="13" y="7" width="5" height="5" rx="1"/>' },
+  sante:      { color:'#EF4444', svg:'<rect fill="currentColor" x="10" y="3" width="4" height="18" rx="2"/><rect fill="currentColor" x="3" y="10" width="18" height="4" rx="2"/>' },
+  universite: { color:'#3B7EF6', svg:'<polygon fill="currentColor" points="12,4 23,9.5 12,15 1,9.5"/><path fill="currentColor" d="M6,13L6,18Q6,21 12,21Q18,21 18,18L18,13L12,16Z"/>' },
+  restaurant: { color:'#F59E0B', svg:'<rect fill="currentColor" x="6" y="3" width="1.5" height="8" rx=".75"/><rect fill="currentColor" x="8" y="3" width="1.5" height="8" rx=".75"/><rect fill="currentColor" x="10" y="3" width="1.5" height="8" rx=".75"/><rect fill="currentColor" x="7.5" y="11" width="2" height="10" rx="1"/><path fill="currentColor" d="M15,3L18,3Q20,5 20,9L15,9Z"/><rect fill="currentColor" x="15" y="9" width="2.5" height="12" rx="1.25"/>' },
+  commerce:   { color:'#14B8A6', svg:'<path fill="currentColor" d="M2,10L5,3L19,3L22,10Z"/><rect fill="currentColor" x="3" y="10" width="18" height="12" rx="1"/>' },
+  parc:       { color:'#22C55E', svg:'<path fill="currentColor" d="M12,2L22,16L17,16L17,21L7,21L7,16L2,16Z"/>' },
+  musee:      { color:'#D97706', svg:'<polygon fill="currentColor" points="1,9 23,9 12,3"/><rect fill="currentColor" x="2" y="9" width="3" height="11"/><rect fill="currentColor" x="7.5" y="9" width="3" height="11"/><rect fill="currentColor" x="13.5" y="9" width="3" height="11"/><rect fill="currentColor" x="19" y="9" width="3" height="11"/><rect fill="currentColor" x="1" y="20" width="22" height="3" rx="1"/>' },
+  sport:      { color:'#6366F1', svg:'<rect fill="currentColor" x="1" y="9" width="4" height="6" rx="1.5"/><rect fill="currentColor" x="19" y="9" width="4" height="6" rx="1.5"/><rect fill="currentColor" x="2.5" y="7" width="3" height="10" rx="1"/><rect fill="currentColor" x="18.5" y="7" width="3" height="10" rx="1"/><rect fill="currentColor" x="5.5" y="11" width="13" height="2" rx="1"/>' },
+  autre:      { color:'#6B7280', svg:'<circle fill="currentColor" cx="5" cy="12" r="2.5"/><circle fill="currentColor" cx="12" cy="12" r="2.5"/><circle fill="currentColor" cx="19" cy="12" r="2.5"/>' },
 };
 
 var adminZoneLayer = L.layerGroup().addTo(map);
 window.addAdminZones = function(zones) {
   adminZoneLayer.clearLayers();
   zones.forEach(function(z) {
-    var cat = normCat(z.categorie);
-    var cfg = ZONE_ICONS[cat] || ZONE_ICONS['autre'];
-    var iconHtml =
-      '<div style="width:4px;height:4px;border-radius:50%;background:#fff;' +
-      'border:2.5px solid ' + cfg.color + ';' +
-      'box-shadow:0 2px 10px rgba(0,0,0,0.22);cursor:pointer;position:relative;">' +
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" ' +
-      'color="' + cfg.color + '" ' +
-      'style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none;">' +
+    var cfg = ZONE_ICONS[normCat(z.categorie)] || ZONE_ICONS['autre'];
+    var html =
+      '<div style="width:28px;height:28px;border-radius:50%;' +
+      'background:' + cfg.color + '22;border:2px solid ' + cfg.color + ';' +
+      'display:flex;align-items:center;justify-content:center;' +
+      'box-shadow:0 2px 10px rgba(0,0,0,.28);cursor:pointer;">' +
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" color="' + cfg.color + '">' +
       cfg.svg + '</svg></div>';
-    var icon = L.divIcon({
-      className: '',
-      html: iconHtml,
-      iconSize: [10, 10],
-      iconAnchor: [5, 5],
-    });
-    var m = L.marker([z.lat, z.lng], { icon: icon });
-    var tip = '<b style="color:#1A1A2E">' + z.name + '</b>';
+    var icon = L.divIcon({ className:'', html:html, iconSize:[28,28], iconAnchor:[14,14] });
+    var m = L.marker([z.lat,z.lng], { icon:icon });
+    var tip = '<b>' + z.name + '</b>';
     if (z.categorie) tip += '<br/><span style="color:' + cfg.color + ';font-size:11px">&#9679; ' + z.categorie + '</span>';
-    m.bindTooltip(tip, { direction: 'top', offset: [0, -20] });
-    m.on('click', function() {
-      window.ReactNativeWebView.postMessage('ADMIN_ZONE:' + z.lat.toFixed(5) + ':' + z.lng.toFixed(5) + ':' + (z.name || ''));
+    m.bindTooltip(tip, { direction:'top', offset:[0,-20] });
+    m.on('click', function(){
+      window.ReactNativeWebView.postMessage('ADMIN_ZONE:'+z.lat.toFixed(5)+':'+z.lng.toFixed(5)+':'+(z.name||''));
     });
     adminZoneLayer.addLayer(m);
   });
@@ -934,6 +932,7 @@ export default function MapScreen() {
   const fetchDotsRef = useRef(null);
   useEffect(() => { fetchDotsRef.current = fetchAndInjectZoneDots; });
 
+
   const pullResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, gs) => gs.dy > 8 && gs.moveY < 140 && !pullActive.current,
@@ -1081,9 +1080,18 @@ export default function MapScreen() {
 
   const coords = userCoords || DEFAULT_COORDS;
   const center = mapCenter || coords;
-  const html = mode === 'globe'
-    ? buildGlobeHTML(coords.latitude, coords.longitude)
-    : buildMapHTML(center.latitude, center.longitude, pickMode, zoneRadius, mapStyle);
+
+  // Reconstruire le HTML seulement quand les paramètres structurels changent
+  const globeHtml = useMemo(
+    () => buildGlobeHTML(coords.latitude, coords.longitude, mapStyle),
+    [coords.latitude, coords.longitude, mapStyle]
+  );
+  const mapHtml = useMemo(
+    () => buildMapHTML(center.latitude, center.longitude, pickMode, zoneRadius, mapStyle),
+    // mapStyle inclus pour le premier chargement — les changements suivants passent par reloadStyle
+    [center.latitude, center.longitude, pickMode, zoneRadius, mapStyle]
+  );
+  const html = mode === 'globe' ? globeHtml : mapHtml;
 
   return (
     <View style={styles.container}>

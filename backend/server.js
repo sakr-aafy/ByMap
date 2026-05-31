@@ -10,6 +10,7 @@ const { Server } = require('socket.io');
 require('dotenv').config();
 
 const connectDB         = require('./src/config/db.config');
+const securityMiddleware = require('./src/middleware/security.middleware');
 const authRoutes        = require('./src/routes/auth.routes');
 const userRoutes        = require('./src/routes/user.routes');
 const adminRoutes       = require('./src/routes/admin.routes');
@@ -34,6 +35,7 @@ app.use(cors({ origin: process.env.CLIENT_URL || '*', credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));
+app.use(securityMiddleware);
 
 // ─── Fichiers uploadés (dev) ──────────────────────────────────────────────────
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));

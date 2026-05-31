@@ -27,6 +27,7 @@ import {
   FACEBOOK_APP_ID,
 } from '../config/oauth';
 import { useCall } from '../context/CallContext';
+import { API_URL } from '../environments/environment';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -100,6 +101,51 @@ const InputField = ({
   );
 };
 
+// ── Saisie OTP 6 chiffres ─────────────────────────────────────────────────────
+const CodeInput = ({ value, onChange }) => {
+  const inputs = useRef([]);
+  const digits = value.split('');
+
+  const handleKey = (i, v) => {
+    const clean = v.replace(/\D/g, '').slice(-1);
+    const next = [...digits];
+    next[i] = clean;
+    onChange(next.join(''));
+    if (clean && i < 5) inputs.current[i + 1]?.focus();
+  };
+
+  const handleBackspace = (i, v) => {
+    if (!v && i > 0) {
+      const next = [...digits];
+      next[i - 1] = '';
+      onChange(next.join(''));
+      inputs.current[i - 1]?.focus();
+    }
+  };
+
+  return (
+    <View style={s.codeRow}>
+      {Array.from({ length: 6 }).map((_, i) => (
+        <TextInput
+          key={i}
+          ref={r => { inputs.current[i] = r; }}
+          style={[s.codeBox, digits[i] && s.codeBoxFilled]}
+          value={digits[i] || ''}
+          onChangeText={v => handleKey(i, v)}
+          onKeyPress={({ nativeEvent }) => {
+            if (nativeEvent.key === 'Backspace') handleBackspace(i, digits[i]);
+          }}
+          keyboardType="number-pad"
+          maxLength={1}
+          textAlign="center"
+          selectTextOnFocus
+          autoFocus={i === 0}
+        />
+      ))}
+    </View>
+  );
+};
+
 // ── Composant principal ───────────────────────────────────────────────────────
 export default function LoginScreen() {
   const navigation = useNavigation();
@@ -120,9 +166,15 @@ export default function LoginScreen() {
   const [email,      setEmail]      = useState('');
   const [password,   setPassword]   = useState('');
   const [confirm,    setConfirm]    = useState('');
-  const [saveLogin,  setSaveLogin]  = useState(true);
-  const [errors,     setErrors]     = useState({});
-  const [loading,    setLoading]    = useState(false);
+  const [saveLogin,    setSaveLogin]    = useState(true);
+  const [errors,       setErrors]       = useState({});
+  const [loading,      setLoading]      = useState(false);
+
+  // OTP e-mail (inscription)
+  const [otpSent,      setOtpSent]      = useState(false);
+  const [otpCode,      setOtpCode]      = useState('');
+  const [otpLoading,   setOtpLoading]   = useState(false);
+  const [otpCountdown, setOtpCountdown] = useState(0);
 
   // Animation d'entrée
   const fadeAnim  = useRef(new Animated.Value(0)).current;
@@ -134,10 +186,20 @@ export default function LoginScreen() {
     ]).start();
   }, [screen]);
 
+  // Compte à rebours renvoi OTP
+  useEffect(() => {
+    if (otpCountdown <= 0) return;
+    const t = setTimeout(() => setOtpCountdown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [otpCountdown]);
+
   const goTo = (s) => {
     setScreen(s);
     setErrors({});
     setRegStep(1);
+    setOtpSent(false);
+    setOtpCode('');
+    setOtpCountdown(0);
     fadeAnim.setValue(0);
     slideAnim.setValue(24);
   };
@@ -185,9 +247,65 @@ export default function LoginScreen() {
     return e;
   };
 
+  // ── Handlers OTP ───────────────────────────────────────────────────────────
+  const handleSendOtp = async () => {
+    const e = validateStep1();
+    if (Object.keys(e).length) { setErrors(e); return; }
+    setErrors({});
+    setOtpLoading(true);
+    try {
+      const res  = await fetch(`${API_URL}/auth/send-register-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim().toLowerCase() }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setErrors({ contact: data.message }); return; }
+      setOtpSent(true);
+      setOtpCode('');
+      setOtpCountdown(60);
+    } catch {
+      setErrors({ contact: 'Erreur réseau, réessayez' });
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (otpCode.length < 6) { setErrors({ otp: 'Entrez les 6 chiffres' }); return; }
+    setErrors({});
+    setOtpLoading(true);
+    try {
+      const res  = await fetch(`${API_URL}/auth/verify-register-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), code: otpCode }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setErrors({ otp: data.message }); return; }
+      setOtpSent(false);
+      setOtpCode('');
+      setRegStep(2);
+    } catch {
+      setErrors({ otp: 'Erreur réseau, réessayez' });
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
   // ── Handlers ───────────────────────────────────────────────────────────────
   const handleRegContinue = () => {
     if (regStep === 1) {
+      if (regType === 'email') {
+        // Email → OTP obligatoire
+        if (!otpSent) {
+          handleSendOtp();
+        } else {
+          handleVerifyOtp();
+        }
+        return;
+      }
+      // Téléphone → pas d'OTP, continuer directement
       const e = validateStep1();
       if (Object.keys(e).length) { setErrors(e); return; }
       setErrors({});
@@ -300,7 +418,7 @@ export default function LoginScreen() {
     }
   };
 
-  const canStep1  = (regType === 'phone' ? phone : email).length > 0;
+  const canStep1  = otpSent ? otpCode.length === 6 : (regType === 'phone' ? phone : email).length > 0;
   const canStep2  = prenom.trim().length > 0;
   const canStep3  = password.length > 0 && confirm.length > 0;
   const canLogin  = (loginTab === 'phone' ? phone : email).length > 0 && password.length > 0;
@@ -363,8 +481,8 @@ export default function LoginScreen() {
                 {/* ── Carte principale ── */}
                 <View style={s.card}>
 
-                  {/* ── ÉTAPE 1 : contact (téléphone ou e-mail) ── */}
-                  {regStep === 1 && (
+                  {/* ── ÉTAPE 1a : saisie contact ── */}
+                  {regStep === 1 && !otpSent && (
                     <>
                       <View style={s.cardTitleRow}>
                         <View style={[s.cardTitleBadge, { backgroundColor: C.greenGlow }]}>
@@ -377,14 +495,14 @@ export default function LoginScreen() {
                       <View style={s.toggleRow}>
                         <TouchableOpacity
                           style={[s.toggleBtn, regType === 'phone' && s.toggleBtnActive]}
-                          onPress={() => { setRegType('phone'); setEmail(''); setErrors(p => ({ ...p, contact: '' })); }}
+                          onPress={() => { setRegType('phone'); setEmail(''); setErrors({}); }}
                         >
                           <FontAwesome6 name="phone" size={12} color={regType === 'phone' ? C.green : C.textFaint} />
                           <Text style={[s.toggleBtnText, regType === 'phone' && s.toggleBtnTextActive]}>Téléphone</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                           style={[s.toggleBtn, regType === 'email' && s.toggleBtnActive]}
-                          onPress={() => { setRegType('email'); setPhone(''); setErrors(p => ({ ...p, contact: '' })); }}
+                          onPress={() => { setRegType('email'); setPhone(''); setErrors({}); }}
                         >
                           <FontAwesome6 name="envelope" size={12} color={regType === 'email' ? C.green : C.textFaint} />
                           <Text style={[s.toggleBtnText, regType === 'email' && s.toggleBtnTextActive]}>E-mail</Text>
@@ -416,9 +534,9 @@ export default function LoginScreen() {
                       )}
 
                       <TouchableOpacity
-                        style={[s.primaryBtn, !canStep1 && s.primaryBtnOff]}
+                        style={[s.primaryBtn, (!canStep1 || otpLoading) && s.primaryBtnOff]}
                         onPress={handleRegContinue}
-                        disabled={!canStep1}
+                        disabled={!canStep1 || otpLoading}
                         activeOpacity={0.85}
                       >
                         <LinearGradient
@@ -426,9 +544,81 @@ export default function LoginScreen() {
                           start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
                           style={s.primaryBtnGrad}
                         >
-                          <Text style={s.primaryBtnText}>Continuer</Text>
-                          <FontAwesome6 name="arrow-right" size={14} color="#fff" style={{ marginLeft: 8 }} />
+                          {otpLoading
+                            ? <ActivityIndicator color="#fff" />
+                            : <>
+                                <Text style={s.primaryBtnText}>
+                                  {regType === 'email' ? 'Envoyer le code' : 'Continuer'}
+                                </Text>
+                                <FontAwesome6 name="arrow-right" size={14} color="#fff" style={{ marginLeft: 8 }} />
+                              </>
+                          }
                         </LinearGradient>
+                      </TouchableOpacity>
+                    </>
+                  )}
+
+                  {/* ── ÉTAPE 1b : vérification OTP e-mail ── */}
+                  {regStep === 1 && otpSent && (
+                    <>
+                      <View style={s.cardTitleRow}>
+                        <View style={[s.cardTitleBadge, { backgroundColor: C.greenGlow }]}>
+                          <Text style={[s.cardTitleBadgeText, { color: C.green }]}>1 / 3</Text>
+                        </View>
+                        <Text style={s.cardTitle}>Vérification e-mail</Text>
+                      </View>
+
+                      {/* Récap e-mail + bouton modifier */}
+                      <View style={s.identitySummary}>
+                        <View style={[s.identityAvatar, { backgroundColor: C.greenGlow, justifyContent: 'center', alignItems: 'center' }]}>
+                          <FontAwesome6 name="envelope" size={16} color={C.green} />
+                        </View>
+                        <Text style={[s.identityContact, { flex: 1 }]} numberOfLines={1}>{email}</Text>
+                        <TouchableOpacity
+                          onPress={() => { setOtpSent(false); setOtpCode(''); setErrors({}); }}
+                          style={s.identityEditBtn}
+                          hitSlop={8}
+                        >
+                          <FontAwesome6 name="pen" size={12} color={C.green} />
+                          <Text style={s.identityEditText}>Modifier</Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      <Text style={s.otpHint}>
+                        Un code à 6 chiffres a été envoyé à <Text style={{ color: C.green, fontWeight: '700' }}>{email}</Text>
+                      </Text>
+
+                      {/* Saisie 6 cases */}
+                      <CodeInput value={otpCode} onChange={(v) => { setOtpCode(v); setErrors(p => ({ ...p, otp: '' })); }} />
+                      {errors.otp ? <Text style={[s.errText, { textAlign: 'center' }]}>{errors.otp}</Text> : null}
+
+                      <TouchableOpacity
+                        style={[s.primaryBtn, (!canStep1 || otpLoading) && s.primaryBtnOff]}
+                        onPress={handleRegContinue}
+                        disabled={!canStep1 || otpLoading}
+                        activeOpacity={0.85}
+                      >
+                        <LinearGradient
+                          colors={canStep1 ? [C.green, C.greenDark] : ['#B0D8C8', '#9DC9B6']}
+                          start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                          style={s.primaryBtnGrad}
+                        >
+                          {otpLoading
+                            ? <ActivityIndicator color="#fff" />
+                            : <Text style={s.primaryBtnText}>Vérifier le code</Text>
+                          }
+                        </LinearGradient>
+                      </TouchableOpacity>
+
+                      {/* Renvoi */}
+                      <TouchableOpacity
+                        onPress={() => { if (otpCountdown === 0) handleSendOtp(); }}
+                        disabled={otpCountdown > 0}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={[s.otpResend, otpCountdown > 0 && s.otpResendDisabled]}>
+                          {otpCountdown > 0 ? `Renvoyer le code (${otpCountdown}s)` : 'Renvoyer le code'}
+                        </Text>
                       </TouchableOpacity>
                     </>
                   )}
@@ -1041,4 +1231,21 @@ const s = StyleSheet.create({
   },
   bottomBarText: { fontSize: 14, color: C.textDim },
   bottomBarLink: { fontSize: 14, fontWeight: '800', color: C.green },
+
+  // ── OTP
+  codeRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
+  codeBox: {
+    flex: 1, height: 54, borderRadius: 12,
+    backgroundColor: C.inputBg, borderWidth: 1.5, borderColor: C.border,
+    fontSize: 22, fontWeight: '800', color: C.text, textAlign: 'center',
+  },
+  codeBoxFilled: { borderColor: C.green, backgroundColor: C.greenGlow },
+  otpHint: {
+    fontSize: 12, color: C.textDim, textAlign: 'center',
+    lineHeight: 18, marginBottom: 4,
+  },
+  otpResend: {
+    textAlign: 'center', fontSize: 13, color: C.green, fontWeight: '600', marginTop: 4,
+  },
+  otpResendDisabled: { color: C.textFaint },
 });

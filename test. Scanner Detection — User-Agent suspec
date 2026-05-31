@@ -1,0 +1,157 @@
+1. Scanner Detection — User-Agent suspect
+
+# Nmap scanner
+curl -i http://localhost:5000/api/auth/login \
+  -H "User-Agent: nmap/7.94"
+
+# sqlmap
+curl -i http://localhost:5000/api/publications \
+  -H "User-Agent: sqlmap/1.8"
+
+# Masscan
+curl -i http://localhost:5000/api/users \
+  -H "User-Agent: masscan/1.3"
+Résultat attendu : 403 Forbidden — "Scanner or bot detected"
+
+2. Rate Limiting — Trop de requêtes
+
+# Envoyer 160 requêtes rapides (limite = 150)
+for i in $(seq 1 160); do
+  curl -s -o /dev/null -w "%{http_code}\n" \
+    http://localhost:5000/api/publications \
+    -H "X-Forwarded-For: 10.1.1.1"
+done
+Résultat attendu : Les 150 premières → 200, ensuite → 429 Too Many Requests
+
+3. Path Traversal — Accès fichiers système
+
+# Traversal classique (utiliser --path-as-is pour éviter la normalisation)
+curl -i --path-as-is "http://localhost:5000/../etc/passwd"
+
+# Double encodage
+curl -i --path-as-is "http://localhost:5000/%2e%2e/etc/shadow"
+
+# Windows style
+curl -i --path-as-is "http://localhost:5000/api/..%5cwindows/system32"
+
+# Null byte
+curl -i --path-as-is "http://localhost:5000/api/file%00.txt"
+Résultat attendu : 403 Forbidden — "Path traversal detected"
+
+4. Payload Oversized — Corps > 2MB
+
+# Générer un fichier de 3MB et l'envoyer
+dd if=/dev/urandom bs=1024 count=3072 2>/dev/null | base64 > /tmp/big.txt
+
+curl -i -X POST http://localhost:5000/api/publications \
+  -H "Content-Type: application/json" \
+  -d "{\"data\": \"$(cat /tmp/big.txt)\"}"
+Résultat attendu : 413 Payload Too Large
+
+5. Injection Attacks
+5a. NoSQL Injection (opérateurs dans les valeurs)
+
+curl -i -X POST http://localhost:5000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "admin@test.com", "password": "$where this.password.length > 0"}'
+
+curl -i -X GET "http://localhost:5000/api/users?filter=check+\$ne+null" \
+  -H "X-Forwarded-For: 10.5.1.1"
+5b. SQL Injection
+
+curl -i -X POST http://localhost:5000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "admin'\''--", "password": "1'\'' OR '\''1'\''='\''1"}'
+
+curl -i "http://localhost:5000/api/publications?id=1+UNION+SELECT+*+FROM+users--" \
+  -H "X-Forwarded-For: 10.6.1.1"
+5c. XSS
+
+curl -i -X POST http://localhost:5000/api/publications \
+  -H "Content-Type: application/json" \
+  -d '{"title": "<script>alert(document.cookie)</script>", "content": "test"}' \
+  -H "X-Forwarded-For: 10.7.1.1"
+5d. Command Injection
+
+curl -i -X POST http://localhost:5000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "test@test.com; cat /etc/passwd", "password": "test | whoami"}' \
+  -H "X-Forwarded-For: 10.8.1.1"
+5e. Code Injection
+
+curl -i -X POST http://localhost:5000/api/publications \
+  -H "Content-Type: application/json" \
+  -d '{"data": "eval(require(\"child_process\").execSync(\"id\").toString())"}' \
+  -H "X-Forwarded-For: 10.9.1.1"
+Résultat attendu (tous) : 400 Bad Request — "Injection detected"
+
+6. HTTP Methods Interdites — TRACE / DELETE
+
+# Méthode TRACE (fuite de headers)
+curl -i -X TRACE http://localhost:5000/api/publications \
+  -H "X-Forwarded-For: 10.10.1.1"
+
+# DELETE non autorisé sur route publique
+curl -i -X DELETE http://localhost:5000/api/auth/login \
+  -H "X-Forwarded-For: 10.11.1.1"
+Résultat attendu : 405 Method Not Allowed
+
+7. Brute Force — Attaque login répétée
+
+# 9 tentatives échouées sur /login (limite = 8)
+for i in $(seq 1 9); do
+  echo "Tentative $i:"
+  curl -s -X POST http://localhost:5000/api/auth/login \
+    -H "Content-Type: application/json" \
+    -H "X-Forwarded-For: 10.20.1.1" \
+    -d '{"email": "victim@bymap.com", "password": "wrongpassword"}' \
+    | python3 -m json.tool
+  echo ""
+done
+Résultat attendu : Tentatives 1-8 → 401, tentative 9+ → alerte email déclenchée et loguée
+
+Script de test complet (automatisé)
+
+#!/bin/bash
+BASE="http://localhost:5000"
+IP="10.99.1.1"
+PASS=0; FAIL=0
+
+check() {
+  local desc=$1 expected=$2 actual=$3
+  if [ "$actual" = "$expected" ]; then
+    echo "✓ $desc (HTTP $actual)"
+    ((PASS++))
+  else
+    echo "✗ $desc — attendu $expected, reçu $actual"
+    ((FAIL++))
+  fi
+}
+
+# Scanner
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/auth/login" -H "User-Agent: nmap/7.94")
+check "Scanner nmap" 403 $STATUS
+
+# Path traversal
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" --path-as-is "$BASE/../etc/passwd" -H "X-Forwarded-For: $IP")
+check "Path traversal" 403 $STATUS
+
+# SQL injection
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/auth/login" \
+  -H "Content-Type: application/json" -H "X-Forwarded-For: $IP" \
+  -d '{"email":"1 UNION SELECT * FROM users--","password":"x"}')
+check "SQL injection" 400 $STATUS
+
+# XSS
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/publications" \
+  -H "Content-Type: application/json" -H "X-Forwarded-For: $IP" \
+  -d '{"title":"<script>alert(1)</script>"}')
+check "XSS" 400 $STATUS
+
+# TRACE
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X TRACE "$BASE/api/auth/login" -H "X-Forwarded-For: $IP")
+check "TRACE method" 405 $STATUS
+
+echo ""
+echo "Résultats : $PASS passés / $((PASS+FAIL)) total"
+Note : --path-as-is est indispensable pour les tests path traversal — sans ce flag, curl normalise /../ → / comme les navigateurs, et l'attaque ne parvient jamais au serveur.

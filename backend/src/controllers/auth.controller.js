@@ -260,7 +260,9 @@ exports.forgotPassword = async (req, res) => {
     if (!email) return res.status(400).json({ message: 'Email requis' });
 
     const user = await User.findOne({ email: email.toLowerCase() });
-    if (!user) return res.status(404).json({ message: 'Aucun compte associé à cet e-mail' });
+
+    // Réponse identique que l'email existe ou non — évite l'énumération d'emails
+    if (!user) return res.json({ message: 'Code de réinitialisation envoyé' });
 
     const code      = generateOtp();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
